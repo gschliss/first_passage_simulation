@@ -31,3 +31,6 @@ results/*
 .dropbox
 .dropbox.attr
 Icon?
+
+# SLURM logs
+slurm/logs/

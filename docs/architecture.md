@@ -132,8 +132,11 @@ statistics to compare (open item) can be made later without re-running.
 Same entry point everywhere (L33):
 
 ```
-python scripts/run.py configs/lattice2d.yaml --sweep-index 0 --chunk 0 --n-molecules 1000
+python scripts/run.py configs/lattice2d.yaml --sweep-index 0 --chunk 0 --n-molecules 250
 ```
+
+Logic lives in `fpsim/jobs.py` (task mapping, run a chunk, merge); see `slurm/README.md`
+for the cluster workflow.
 
 - `--sweep-index` picks a point from the config's named sweeps, numbered across sweeps (L41: 0–8).
 - `--chunk` splits one sweep point into independent molecule batches.

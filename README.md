@@ -19,19 +19,22 @@ diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
 │   ├── receptors.py      # receptor layouts on target cells
 │   ├── kernel/           # Numba per-molecule simulation loops
 │   ├── simulate.py       # config + sweep point -> per-molecule results table
+│   ├── jobs.py           # split sweeps into chunks, run, merge
+│   ├── io.py             # Parquet + JSON results
 │   └── viz/              # figures and animations
 ├── configs/              # one YAML per experiment
 ├── scripts/              # command-line entry points and demos
+├── slurm/                # SLURM array job template and instructions
 ├── tests/                # pytest
 ├── docs/                 # model notes and architecture
 ├── data/                 # external inputs (gitignored)
 └── results/              # outputs and figures (gitignored)
 ```
 
-Build status: steps 1–3 of 6 done (config, 2D lattice, receptors, layer factor;
-2D kernel with free/bound switching, binding layer, receptor capture and escape;
-pilot run). Next: generalized sweeps (L38–L39), then the job runner and SLURM
-scripts (step 4).
+Build status: steps 1–4 of 6 done (config with named sweeps, 2D lattice,
+receptors, layer factor; 2D kernel with free/bound switching, binding layer,
+receptor capture and escape; pilot run; job runner, SLURM script and merge).
+Next: the 3D version (step 5).
 
 ## Setup
 
@@ -54,6 +57,13 @@ python scripts/check_kernel_2d.py                       # kernel validation figu
 python scripts/check_capture_2d.py                      # adaptive vs fixed on capture/escape (~10 min)
 python scripts/pilot_2d.py --n 200 --t-max 5000         # pilot run + figure (~5 min)
 pytest
+```
+
+A sweep, locally (small) or on SLURM (see [slurm/README.md](slurm/README.md)):
+
+```bash
+python scripts/run.py configs/mini2d.yaml --all --chunks-per-point 2 --n-molecules 20 --t-max 200
+python scripts/merge.py results/runs/mini2d --chunks-per-point 2
 ```
 
 Demos used to make model decisions:
