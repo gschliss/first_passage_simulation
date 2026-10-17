@@ -25,11 +25,16 @@ from fpsim.viz.cluster import draw_cells, escape_mask
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUT = PROJECT_ROOT / "results" / "pilot"
 CONFIG = PROJECT_ROOT / "configs" / "lattice2d.yaml"
+PILOT_DWELLS = (0.005, 0.0707, 1.0)  # s; points of the "dwell" sweep used for the pilot (L40)
+
+
+def pilot_points(cfg):
+    return [cfg.find_point("dwell", bound_dwell=d) for d in PILOT_DWELLS]
 
 
 def run_all(n, t_max, n_traj):
     cfg = load_config(CONFIG)
-    for i, dwell in enumerate(cfg.run.bound_dwell):
+    for i, dwell in zip(pilot_points(cfg), PILOT_DWELLS):
         r = simulate(cfg, i, n_molecules=n, t_max=t_max, n_trajectories=n_traj)
         save_result(r, OUT / f"pilot2d_sweep{i}")
         m = r.molecules
@@ -43,7 +48,7 @@ def run_all(n, t_max, n_traj):
 def plot(out):
     cfg = load_config(CONFIG)
     cluster = make_cluster(cfg.geometry)
-    results = [load_result(OUT / f"pilot2d_sweep{i}") for i in range(len(cfg.run.bound_dwell))]
+    results = [load_result(OUT / f"pilot2d_sweep{i}") for i in pilot_points(cfg)]
     t_max = results[0].meta["t_max"]
 
     fig = plt.figure(figsize=(17, 11))
@@ -53,7 +58,7 @@ def plot(out):
     extent = (cluster.rings + 1.6) * cluster.spacing
     X, Y = np.meshgrid(np.linspace(-extent, extent, 700), np.linspace(-extent, extent, 700))
     lost = escape_mask(cluster, X, Y)
-    for k, (r, dwell) in enumerate(zip(results, cfg.run.bound_dwell)):
+    for k, (r, dwell) in enumerate(zip(results, PILOT_DWELLS)):
         ax = fig.add_subplot(gs[0, k])
         ax.contourf(X, Y, lost.astype(float), levels=[0.5, 1.5], colors=["#fde0c5"])
         draw_cells(ax, cluster, cfg.geometry.target_ring, labels=False)
@@ -79,7 +84,7 @@ def plot(out):
     # Bottom left: cumulative capture and escape
     ax = fig.add_subplot(gs[1, 0])
     t = np.logspace(-1, np.log10(t_max), 300)
-    for k, (r, dwell) in enumerate(zip(results, cfg.run.bound_dwell)):
+    for k, (r, dwell) in enumerate(zip(results, PILOT_DWELLS)):
         m = r.molecules
         for outcome, ls in (("captured", "-"), ("escaped", "--")):
             times = np.sort(m.t_end[m.outcome == outcome].to_numpy())
@@ -93,7 +98,7 @@ def plot(out):
 
     # Bottom middle: outcome totals
     ax = fig.add_subplot(gs[1, 1])
-    labels = [f"{d * 1e3:.0f} ms" for d in cfg.run.bound_dwell]
+    labels = [f"{d * 1e3:.0f} ms" for d in PILOT_DWELLS]
     bottoms = np.zeros(len(results))
     for outcome, color in (("captured", "#2ca02c"), ("escaped", "#d9480f"), ("timeout", "#999999")):
         vals = np.array([(r.molecules.outcome == outcome).mean() for r in results])

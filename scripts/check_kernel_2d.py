@@ -173,12 +173,13 @@ def main():
     rows = []
 
     print("A. accuracy sweep (adaptive)")
-    for i, t_max in [(0, 50.0), (1, 50.0), (2, 200.0)]:
+    idx = {d: cfg.find_point("dwell", bound_dwell=d) for d in (0.005, 0.0707, 1.0)}
+    for i, t_max in [(idx[0.005], 50.0), (idx[0.0707], 50.0), (idx[1.0], 200.0)]:
         for frac in (0.25, 0.125, 0.0625):
             rows.append(run(cfg, i, int(1000 * q), t_max * q, distance_fraction=frac))
 
     print("C/D. adaptive vs fixed (same molecules and duration)")
-    for i, n, t_max in [(0, 200, 2.0), (1, 200, 5.0), (2, 100, 10.0)]:
+    for i, n, t_max in [(idx[0.005], 200, 2.0), (idx[0.0707], 200, 5.0), (idx[1.0], 100, 10.0)]:
         r = run(cfg, i, max(int(n * q), 10), t_max * q)
         r["check"] = "adaptive_vs_fixed"
         rows.append(r)

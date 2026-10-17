@@ -38,7 +38,7 @@ VARIANTS = {
     "adaptive halved (0.0625)": dict(mode="adaptive", distance_fraction=0.0625),
     "fixed": dict(mode="fixed", distance_fraction=0.125),
 }
-POINTS = [(0, "5 ms"), (2, "1000 ms")]
+POINTS = [(SMALL.find_point("dwell", bound_dwell=0.005), "5 ms"), (SMALL.find_point("dwell", bound_dwell=1.0), "1000 ms")]
 N, T_MAX = 200, 20.0
 
 

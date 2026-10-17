@@ -57,7 +57,7 @@ def test_unbinding_rate_is_exact(short_runs):
         m = r.molecules
         T = m.t_end.sum()
         bound_time = T - m.time_free.sum()
-        expected = bound_time / CFG.run.bound_dwell[i]
+        expected = bound_time / r.meta["sweep_point"]["bound_dwell"]
         assert m.n_trips.sum() == pytest.approx(expected, rel=4 / np.sqrt(expected))  # Poisson, 4 sigma
 
 

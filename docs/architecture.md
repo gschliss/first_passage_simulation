@@ -135,7 +135,7 @@ Same entry point everywhere (L33):
 python scripts/run.py configs/lattice2d.yaml --sweep-index 0 --chunk 0 --n-molecules 1000
 ```
 
-- `--sweep-index` picks a point from the config's sweep list (dwell 5/71/1000 ms, …).
+- `--sweep-index` picks a point from the config's named sweeps, numbered across sweeps (L41: 0–8).
 - `--chunk` splits one sweep point into independent molecule batches.
 - `slurm/submit_sweep.sh` maps `SLURM_ARRAY_TASK_ID` → (sweep index, chunk);
   each task writes `results/<run>/sweep<i>_chunk<j>.parquet`.

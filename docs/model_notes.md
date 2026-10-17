@@ -94,6 +94,7 @@ and is a draft/validation case only.
 | L38 | Free-fraction sweep | Second sweep (in addition to L27): hold the **mean free-trip length 1/k_on = 15 ms** (k_on = 66.7 s⁻¹, from experimental data) and **vary the free fraction f**, with bound dwell 1/k_off = 15 ms × (1 − f)/f (e.g. f = 5% → 285 ms, 10% → 135 ms). With k_on fixed, k_layer (5280 s⁻¹ in 2D) and hence the validated step accuracy are the same at every point. Initial split (L16) uses the sweep point's f. **f = 1, 5, 10, 20, 40%** (bound dwell 1485, 285, 135, 60, 22.5 ms). Requires generalizing sweep points to (free fraction, timescale) pairs. |
 | L39 | Linked sweeps | Add **285 ms** to the 5%-free dwell sweep (L27 becomes 5, 71, 285, 1000 ms) so it shares a point with the L38 sweep (f = 5%, 1/k_on = 15 ms); the two runs of that point should agree. |
 | L40 | Pilot results (2D) | `scripts/pilot_2d.py`, 200 molecules per point, t_max 5000 s, 5% free: **all captured, none escaped** at 5 / 71 / 1000 ms. Mean search **1081 / 993 / 1012 s (±50)**; 90th percentile 1.8–2.2 ks; longest 4.8 ks. Captures while bound: 96 / 92 / 73%. Time free 4.92–5.04%. Cost **~3.1–3.6 core-ms per molecule-second ≈ 3.3 core-s per molecule**, so 10⁴ molecules ≈ **9–10 core-hours per sweep point**. Capture-check (small geometry): adaptive, halved and fixed agree within ~2 SE (resolves differences ≳ 8–10%). |
+| L41 | Production run settings; sweeps in config | **t_max = 20,000 s** (pilot's longest search 4.8 ks; molecules still searching at t_max are censored, L14). Config now holds **named sweeps**, each fixing two of free_fraction, bound_dwell (1/k_off), free_dwell (1/k_on): `dwell` (5% free; 5, 71, 285, 1000 ms) and `free_fraction` (1/k_on = 15 ms; f = 1, 5, 10, 20, 40%), numbered 0–8. The free fraction moved from `membrane` into the sweeps, and each point sets its own initial split (L16). Shared point check (L39), 200 molecules each: point 2 mean search 1107 ± 59 s, point 5 1115 ± 71 s; captured while bound 80 / 83%; time free 5.02 / 4.99%. Pilot files were renumbered to the new indices (its 1000 ms point is now index 3). |
 
 Derived geometry (from L1–L2):
 
@@ -118,7 +119,6 @@ freeze with a marker; live survival curve S(t).
       from ≈ k·20.5·√3/2 µm (edge midpoints of the ring) to k·20.5 µm (corners,
       along a row). Report both?
 - [ ] Decoy receptor layout (later).
-- [ ] L38/L39: generalize the config's sweep points to (free fraction, timescale) pairs.
 - [ ] Sharper adaptive-vs-fixed comparison (L31) with larger fixed-step runs on the cluster.
 - [ ] Cross-check δ = 10 nm against δ = 1 nm in the full lattice at one sweep point (the flat-gap demo already agrees).
 - [ ] What we compare across conditions (MFPT, capture probability, FPT distribution).

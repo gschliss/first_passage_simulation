@@ -48,7 +48,6 @@ class Diffusion:
 
 @dataclass(frozen=True)
 class Membrane:
-    free_fraction: float = 0.05  # equilibrium fraction free (L23)
     binding_layer: float = 0.010  # µm, δ: binding only within this of a membrane (L28)
 
 
@@ -63,22 +62,67 @@ class Stepping:
 
 @dataclass(frozen=True)
 class Run:
-    bound_dwell: tuple = (0.005, 0.0707, 1.0)  # s, mean 1/k_off per sweep point (L27)
     n_molecules: int = 1000
-    t_max: float = 2000.0  # s; placeholder until the pilot run measures search times (build step 3)
+    t_max: float = 20000.0  # s (L41; pilot: longest search 4.8 ks)
     seed: int = 0
     n_trajectories: int = 0  # molecules whose paths are recorded (for animations)
     trajectory_interval: float = 0.05  # s between recorded positions
 
 
+RATE_KEYS = ("free_fraction", "bound_dwell", "free_dwell")
+
+
+@dataclass(frozen=True)
+class Sweep:
+    """One named sweep: exactly two of free_fraction, bound_dwell (1/k_off) and
+    free_dwell (1/k_on) are given, and at most one of them is a list (L23, L27, L38)."""
+
+    name: str
+    free_fraction: float | tuple | None = None
+    bound_dwell: float | tuple | None = None  # s
+    free_dwell: float | tuple | None = None  # s
+
+    def points(self) -> list[dict]:
+        given = {k: getattr(self, k) for k in RATE_KEYS if getattr(self, k) is not None}
+        lists = [k for k, v in given.items() if isinstance(v, tuple)]
+        n = len(given[lists[0]]) if lists else 1
+        out = []
+        for j in range(n):
+            vals = {k: (v[j] if isinstance(v, tuple) else v) for k, v in given.items()}
+            f, tb, tf = vals.get("free_fraction"), vals.get("bound_dwell"), vals.get("free_dwell")
+            # f = tf / (tf + tb): the third quantity follows from the other two.
+            if f is None:
+                f = tf / (tf + tb)
+            elif tb is None:
+                tb = tf * (1 - f) / f
+            elif tf is None:
+                tf = tb * f / (1 - f)
+            out.append(dict(free_fraction=f, bound_dwell=tb, free_dwell=tf))
+        return out
+
+
+DEFAULT_SWEEPS = (
+    Sweep("dwell", free_fraction=0.05, bound_dwell=(0.005, 0.0707, 0.285, 1.0)),  # L27, L39
+    Sweep("free_fraction", free_dwell=0.015, free_fraction=(0.01, 0.05, 0.10, 0.20, 0.40)),  # L38
+)
+
+
 @dataclass(frozen=True)
 class SweepPoint:
-    """Rates for one bound-dwell value. ``k_layer`` needs the lattice's layer factor."""
+    """Rates for one sweep point. ``k_layer`` needs the lattice's layer factor."""
 
-    bound_dwell: float
+    sweep: str
+    free_fraction: float
+    bound_dwell: float  # s, 1/k_off
+    free_dwell: float  # s, 1/k_on
     k_off: float
     k_on: float
     k_layer: float
+
+    @property
+    def label(self) -> str:
+        return (f"{self.sweep}: {self.free_fraction:.0%} free, bound {self.bound_dwell * 1e3:.4g} ms, "
+                f"free {self.free_dwell * 1e3:.3g} ms")
 
 
 @dataclass(frozen=True)
@@ -90,18 +134,35 @@ class Config:
     membrane: Membrane = field(default_factory=Membrane)
     stepping: Stepping = field(default_factory=Stepping)
     run: Run = field(default_factory=Run)
+    sweeps: tuple = DEFAULT_SWEEPS
 
     def __post_init__(self):
         validate(self)
 
-    def sweep_point(self, index: int, layer_factor: float) -> SweepPoint:
-        """Rates for sweep point ``index``: k_off = 1/dwell, k_on from the free fraction (L23),
+    def sweep_points(self, layer_factor: float) -> list[SweepPoint]:
+        """All sweep points, sweeps in config order. k_off = 1/bound_dwell, k_on = 1/free_dwell,
         k_layer = k_on · V_free/V_layer (L28, L29)."""
-        dwell = self.run.bound_dwell[index]
-        k_off = 1.0 / dwell
-        f = self.membrane.free_fraction
-        k_on = k_off * (1 - f) / f
-        return SweepPoint(bound_dwell=dwell, k_off=k_off, k_on=k_on, k_layer=k_on * layer_factor)
+        out = []
+        for sw in self.sweeps:
+            for p in sw.points():
+                k_on = 1.0 / p["free_dwell"]
+                out.append(SweepPoint(sweep=sw.name, k_off=1.0 / p["bound_dwell"], k_on=k_on,
+                                      k_layer=k_on * layer_factor, **p))
+        return out
+
+    def sweep_point(self, index: int, layer_factor: float) -> SweepPoint:
+        return self.sweep_points(layer_factor)[index]
+
+    @property
+    def n_sweep_points(self) -> int:
+        return sum(len(sw.points()) for sw in self.sweeps)
+
+    def find_point(self, sweep: str, **values) -> int:
+        """Index of the point in ``sweep`` matching ``values`` (e.g. bound_dwell=1.0)."""
+        for i, p in enumerate(self.sweep_points(1.0)):
+            if p.sweep == sweep and all(math.isclose(getattr(p, k), v, rel_tol=1e-6) for k, v in values.items()):
+                return i
+        raise KeyError(f"no point {values} in sweep {sweep!r}")
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -118,7 +179,7 @@ SECTIONS = {
 
 
 def from_dict(d: dict) -> Config:
-    unknown = set(d) - set(SECTIONS) - {"name"}
+    unknown = set(d) - set(SECTIONS) - {"name", "sweeps"}
     if unknown:
         raise ValueError(f"unknown config sections: {sorted(unknown)}")
     kwargs = {"name": d.get("name", "unnamed")}
@@ -128,9 +189,16 @@ def from_dict(d: dict) -> Config:
         bad = set(section) - allowed
         if bad:
             raise ValueError(f"unknown keys in '{key}': {sorted(bad)}")
-        if key == "run" and "bound_dwell" in section:
-            section["bound_dwell"] = tuple(section["bound_dwell"])
         kwargs[key] = cls(**section)
+    if "sweeps" in d:
+        sweeps = []
+        for name, spec in (d["sweeps"] or {}).items():
+            spec = dict(spec or {})
+            bad = set(spec) - set(RATE_KEYS)
+            if bad:
+                raise ValueError(f"unknown keys in sweep '{name}': {sorted(bad)}")
+            sweeps.append(Sweep(name, **{k: tuple(v) if isinstance(v, list) else v for k, v in spec.items()}))
+        kwargs["sweeps"] = tuple(sweeps)
     return Config(**kwargs)
 
 
@@ -148,16 +216,41 @@ def validate(cfg: Config) -> None:
         (r.n_per_cell >= 1, "receptors.n_per_cell must be >= 1"),
         (0 < r.capture_radius < g.gap / 2, "capture_radius must be in (0, gap/2)"),
         (cfg.diffusion.d_free > 0 and cfg.diffusion.d_bound > 0, "diffusion coefficients must be positive"),
-        (0 < m.free_fraction < 1, "free_fraction must be in (0, 1)"),
         # Layers of facing cells must not overlap, or "nearest membrane" becomes ambiguous.
         (0 < m.binding_layer < g.gap / 2, "binding_layer must be in (0, gap/2)"),
         (s.mode in ("adaptive", "fixed"), f"stepping.mode must be 'adaptive' or 'fixed', got {s.mode!r}"),
         (0 < s.distance_fraction <= 1 and 0 < s.max_rate_dt < 1, "accuracy settings out of range"),
         (s.dt_fixed is None or s.dt_fixed > 0, "dt_fixed must be positive"),
-        (len(run.bound_dwell) >= 1 and all(t > 0 for t in run.bound_dwell), "bound_dwell must be positive values"),
         (run.n_molecules >= 1 and run.t_max > 0, "n_molecules and t_max must be positive"),
         (math.isfinite(run.trajectory_interval) and run.trajectory_interval > 0, "trajectory_interval must be positive"),
     ]
     errors = [msg for ok, msg in checks if not ok]
+    errors += sweep_errors(cfg.sweeps)
     if errors:
         raise ValueError("invalid config:\n  " + "\n  ".join(errors))
+
+
+def sweep_errors(sweeps) -> list[str]:
+    errors = []
+    if not sweeps:
+        return ["at least one sweep is required"]
+    names = [sw.name for sw in sweeps]
+    if len(set(names)) != len(names):
+        errors.append("sweep names must be unique")
+    for sw in sweeps:
+        given = {k: getattr(sw, k) for k in RATE_KEYS if getattr(sw, k) is not None}
+        if len(given) != 2:
+            errors.append(f"sweep '{sw.name}': give exactly two of {RATE_KEYS}, got {sorted(given)}")
+            continue
+        if sum(isinstance(v, tuple) for v in given.values()) > 1:
+            errors.append(f"sweep '{sw.name}': at most one quantity may be a list")
+            continue
+        for k, v in given.items():
+            vals = v if isinstance(v, tuple) else (v,)
+            if not vals or any(not isinstance(x, (int, float)) for x in vals):
+                errors.append(f"sweep '{sw.name}': {k} must be numbers")
+            elif k == "free_fraction" and not all(0 < x < 1 for x in vals):
+                errors.append(f"sweep '{sw.name}': free_fraction must be in (0, 1)")
+            elif k != "free_fraction" and not all(x > 0 for x in vals):
+                errors.append(f"sweep '{sw.name}': {k} must be positive")
+    return errors
