@@ -31,10 +31,10 @@ diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
 └── results/              # outputs and figures (gitignored)
 ```
 
-Build status: steps 1–4 of 6 done (config with named sweeps, 2D lattice,
-receptors, layer factor; 2D kernel with free/bound switching, binding layer,
-receptor capture and escape; pilot run; job runner, SLURM script and merge).
-Next: the 3D version (step 5).
+Build status: steps 1–5 of 6 done (config with named sweeps; 2D hexagonal and
+3D HCP lattices, receptors, layer factor; 2D and 3D kernels with free/bound
+switching, binding layer, receptor capture and escape; pilots; job runner, SLURM
+script and merge). Next: analysis and figures across sweeps (step 6).
 
 ## Setup
 
@@ -64,6 +64,7 @@ A sweep, locally (small) or on SLURM (see [slurm/README.md](slurm/README.md)):
 ```bash
 python scripts/run.py configs/mini2d.yaml --all --chunks-per-point 2 --n-molecules 20 --t-max 200
 python scripts/merge.py results/runs/mini2d --chunks-per-point 2
+python scripts/plot_capture_curves.py results/runs/mini2d --sweep free_fraction   # capture curves across a sweep
 ```
 
 Demos used to make model decisions:
