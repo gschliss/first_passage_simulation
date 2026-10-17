@@ -1,14 +1,11 @@
-"""fpsim: agent-based first-passage simulations across diffusion dimensions."""
+"""fpsim: first-passage simulations of ligand search in packed cell lattices.
 
-from fpsim.agents import BrownianWalkers
-from fpsim.geometry import Geometry, SphericalShell
-from fpsim.simulation import SimulationResult, run_simulation
+Model and decisions: docs/model_notes.md. Code plan: docs/architecture.md.
+"""
 
-__all__ = [
-    "BrownianWalkers",
-    "Geometry",
-    "SphericalShell",
-    "SimulationResult",
-    "run_simulation",
-]
-__version__ = "0.1.0"
+from fpsim.config import Config, load_config
+from fpsim.lattice import Cluster, layer_factor, make_cluster
+from fpsim.receptors import ReceptorSet, make_receptors
+
+__all__ = ["Config", "load_config", "Cluster", "layer_factor", "make_cluster", "ReceptorSet", "make_receptors"]
+__version__ = "0.2.0"

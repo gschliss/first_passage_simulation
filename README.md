@@ -1,27 +1,33 @@
 # first_passage_simulation
 
-Agent-based simulations of how **diffusion dimension** (1D / 2D / 3D search)
-affects **first-passage time** to a target in bio-inspired geometries.
+Agent-based simulations of how **diffusion dimension** affects **first-passage time**
+for ligands searching a packed lattice of cells. Molecules switch between free
+diffusion in the gaps between cells and diffusion on cell membranes, and are
+captured by receptors on a ring of target cells. A 2D version (disks; free 2D
+diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
+2D membrane) are compared.
+
+- **Model and every decision:** [docs/model_notes.md](docs/model_notes.md)
+- **Code plan and build order:** [docs/architecture.md](docs/architecture.md)
 
 ## Layout
 
 ```
-├── src/fpsim/            # the Python package
-│   ├── geometry/         # domains: start region, walls, target
-│   │   ├── base.py       #   Geometry interface every domain implements
-│   │   └── sphere.py     #   SphericalShell: validation geometry, any dimension
-│   ├── agents/           # walker models (vectorized ensembles)
-│   ├── simulation.py     # time-stepping loop -> first-passage times
-│   ├── analysis/         # FPT statistics + analytical benchmarks
-│   └── io.py             # configs in, results out
-├── configs/              # YAML experiment definitions (one file per experiment)
-├── scripts/              # command-line entry points
-├── notebooks/            # exploration and figures
-├── tests/                # pytest checks, incl. simulation vs. theory
-├── docs/                 # model notes, derivations, decisions
+├── src/fpsim/
+│   ├── config.py         # typed YAML config + derived rates per sweep point
+│   ├── lattice/          # cell clusters: rings, neighbors, ghost ring, layer factor
+│   ├── receptors.py      # receptor layouts on target cells
+│   └── viz/              # figures and animations
+├── configs/              # one YAML per experiment
+├── scripts/              # command-line entry points and demos
+├── tests/                # pytest
+├── docs/                 # model notes and architecture
 ├── data/                 # external inputs (gitignored)
-└── results/              # simulation outputs (gitignored, timestamped run dirs)
+└── results/              # outputs and figures (gitignored)
 ```
+
+Build status: step 1 of 6 done (config, 2D lattice, receptors, layer factor).
+The simulation kernel comes next.
 
 ## Setup
 
@@ -39,17 +45,10 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ## Usage
 
 ```bash
-python scripts/run_simulation.py configs/baseline_sphere.yaml
+python scripts/plot_cluster.py configs/lattice2d.yaml   # cluster check figure
 pytest
 ```
 
-Each run writes `results/<timestamp>_<name>/` with a copy of the config,
-per-dimension `dimN.npz` files of first-passage times, and `summary.json`.
-
-## Adding a geometry
-
-Subclass `fpsim.geometry.Geometry`, implement `sample_start`,
-`apply_boundaries` and `is_absorbed`, register it in
-`fpsim/geometry/__init__.py::GEOMETRIES`, and point a config at it.
-
-See [docs/model_notes.md](docs/model_notes.md) for the model and its assumptions.
+Demos used to make model decisions:
+`scripts/demo_binding_models.py` (binding-layer comparison) and
+`scripts/demo_cell_hopping.py` (single molecule hopping between cells, with GIF).
