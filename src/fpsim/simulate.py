@@ -13,6 +13,7 @@ from fpsim.config import Config
 from fpsim.kernel.common import MODE_ADAPTIVE, MODE_FIXED, OUTCOME_NAMES, molecule_seeds
 from fpsim.kernel.run2d import run_molecules_2d
 from fpsim.lattice import layer_factor, make_cluster
+from fpsim.receptors import make_receptors
 
 
 @dataclass
@@ -31,7 +32,14 @@ def strictest_dt(cfg: Config, k_layer: float, k_off: float) -> float:
 
 
 def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, t_max: float | None = None,
-             seed: int | None = None, n_trajectories: int | None = None, first_id: int = 0) -> Result:
+             seed: int | None = None, n_trajectories: int | None = None, first_id: int = 0,
+             layout_index: int = 0) -> Result:
+    """Simulate ``n_molecules`` for one sweep point.
+
+    ``first_id`` offsets molecule ids (and so their RNG seeds) when a sweep point is split
+    into chunks. ``layout_index`` picks the receptor layout: one layout per job (L36),
+    drawn from (seed, sweep_index, layout_index) and independent of ``first_id``.
+    """
     if cfg.geometry.dim != 2:
         raise NotImplementedError("3D kernel comes in build step 5")
     g, run, st = cfg.geometry, cfg.run, cfg.stepping
@@ -46,11 +54,16 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
     mode = MODE_FIXED if st.mode == "fixed" else MODE_ADAPTIVE
     dt_fixed = st.dt_fixed if st.dt_fixed is not None else strictest_dt(cfg, sp.k_layer, sp.k_off)
     seeds = molecule_seeds(seed, sweep_index, n, first_id)
+    receptors = make_receptors(cluster, g.target_ring, cfg.receptors.n_per_cell, cfg.receptors.capture_radius,
+                               np.random.default_rng([seed, sweep_index, layout_index]))
+    phis = np.arctan2(receptors.directions[..., 1], receptors.directions[..., 0])
 
     t0 = time.time()
-    (outcome, t_end, start_state, final_state, final_cell, start_xy, end_xy,
+    (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_xy, end_xy,
      time_free, n_trips, n_cell_changes, n_steps, traj) = run_molecules_2d(
         seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
+        cluster.ring, cluster.rings, cluster.spacing,
+        phis, receptors.block_of_cell, receptors.capture_radius,
         g.cell_radius, cfg.membrane.binding_layer,
         cfg.diffusion.d_free, cfg.diffusion.d_bound, cfg.membrane.free_fraction,
         sp.k_off, sp.k_layer,
@@ -68,6 +81,7 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "final_state": np.where(final_state == 1, "bound", "free"),
         "final_cell": final_cell,
         "final_ring": cluster.ring[final_cell],
+        "receptor_id": receptor_id,  # index on the capturing cell, -1 if not captured
         "x0": start_xy[:, 0], "y0": start_xy[:, 1],
         "x1": end_xy[:, 0], "y1": end_xy[:, 1],
         "time_free": time_free,
@@ -85,6 +99,9 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "n_molecules": n,
         "t_max": t_max,
         "seed": seed,
+        "layout_index": layout_index,
+        "receptor_cells": receptors.cells.tolist(),
+        "receptor_angles": phis.tolist(),
         "wall_time_s": wall,
     }
     return Result(molecules=molecules, trajectories=traj, meta=meta)

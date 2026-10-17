@@ -79,7 +79,7 @@ def test_fixed_mode_same_schema():
 
 def test_trajectories_recorded(short_runs):
     traj = short_runs[2].trajectories
-    n_frames = int(2.0 / CFG.run.trajectory_interval) + 1
+    n_frames = int(2.0 / CFG.run.trajectory_interval) + 2  # +1 slot for the final position
     assert traj.shape == (2, n_frames, 4)
-    assert np.isfinite(traj).all()
+    assert np.isfinite(traj[:, :-1]).all()  # all timeouts here, so every regular frame is filled
     assert set(np.unique(traj[:, :, 2])) <= {0.0, 1.0}

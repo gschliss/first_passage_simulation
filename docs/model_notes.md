@@ -91,6 +91,9 @@ and is a draft/validation case only.
 | L35 | Architecture | Code plan in [architecture.md](architecture.md), approved. Results stored as **Parquet**, one row per molecule. v0.1 draft code to be **removed** (kept in git history). |
 | L36 | Receptor layouts | Receptor rotations drawn **once per job** from its seed and shared by its molecules; layouts differ across jobs, so the ensemble averages over layouts. |
 | L37 | Exact event timing; accuracy default | (1) Unbinding and binding times are **exact**: a bound dwell is drawn from Exp(k_off) when a molecule binds; a free trip binds when accumulated in-layer exposure (k_layer × time in layer) reaches a draw from Exp(1). Replaces per-step coin flips, which lengthened every dwell by ~k·dt/2 (2.5% at k·dt = 0.05). (2) Default **distance_fraction = 0.125** (was 0.25): at 0.25 the 5 ms point's free fraction was 3% low (4.85 ± 0.04%); at 0.125 and 0.0625 all three sweep points give 5% within error (5 ms: 4.96/4.96%; 71 ms: 5.00/4.96%; 1000 ms: 5.08/4.99%), and cell-change fractions agree across settings. The L31 "halved" check is therefore 0.0625. Full check run (`scripts/check_kernel_2d.py`, `results/figures/kernel2d_checks.png`): at 0.125 the free fraction is 4.96 / 5.03 / 5.08% (5 / 71 / 1000 ms) and at 0.0625 4.89 / 4.99 / 4.99%, i.e. within ~2% of 5%, with run-to-run scatter somewhat larger than the quoted errors. Adaptive vs fixed agree within error, but the fixed runs were short (±10–20%). |
+| L38 | Free-fraction sweep | Second sweep (in addition to L27): hold the **mean free-trip length 1/k_on = 15 ms** (k_on = 66.7 s⁻¹, from experimental data) and **vary the free fraction f**, with bound dwell 1/k_off = 15 ms × (1 − f)/f (e.g. f = 5% → 285 ms, 10% → 135 ms). With k_on fixed, k_layer (5280 s⁻¹ in 2D) and hence the validated step accuracy are the same at every point. Initial split (L16) uses the sweep point's f. **f = 1, 5, 10, 20, 40%** (bound dwell 1485, 285, 135, 60, 22.5 ms). Requires generalizing sweep points to (free fraction, timescale) pairs. |
+| L39 | Linked sweeps | Add **285 ms** to the 5%-free dwell sweep (L27 becomes 5, 71, 285, 1000 ms) so it shares a point with the L38 sweep (f = 5%, 1/k_on = 15 ms); the two runs of that point should agree. |
+| L40 | Pilot results (2D) | `scripts/pilot_2d.py`, 200 molecules per point, t_max 5000 s, 5% free: **all captured, none escaped** at 5 / 71 / 1000 ms. Mean search **1081 / 993 / 1012 s (±50)**; 90th percentile 1.8–2.2 ks; longest 4.8 ks. Captures while bound: 96 / 92 / 73%. Time free 4.92–5.04%. Cost **~3.1–3.6 core-ms per molecule-second ≈ 3.3 core-s per molecule**, so 10⁴ molecules ≈ **9–10 core-hours per sweep point**. Capture-check (small geometry): adaptive, halved and fixed agree within ~2 SE (resolves differences ≳ 8–10%). |
 
 Derived geometry (from L1–L2):
 
@@ -115,6 +118,7 @@ freeze with a marker; live survival curve S(t).
       from ≈ k·20.5·√3/2 µm (edge midpoints of the ring) to k·20.5 µm (corners,
       along a row). Report both?
 - [ ] Decoy receptor layout (later).
+- [ ] L38/L39: generalize the config's sweep points to (free fraction, timescale) pairs.
 - [ ] Sharper adaptive-vs-fixed comparison (L31) with larger fixed-step runs on the cluster.
 - [ ] Cross-check δ = 10 nm against δ = 1 nm in the full lattice at one sweep point (the flat-gap demo already agrees).
 - [ ] What we compare across conditions (MFPT, capture probability, FPT distribution).

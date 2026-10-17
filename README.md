@@ -28,9 +28,10 @@ diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
 └── results/              # outputs and figures (gitignored)
 ```
 
-Build status: steps 1–2 of 6 done (config, 2D lattice, receptors, layer factor;
-2D kernel with free/bound switching and the binding layer). Receptors and escape
-come next (step 3).
+Build status: steps 1–3 of 6 done (config, 2D lattice, receptors, layer factor;
+2D kernel with free/bound switching, binding layer, receptor capture and escape;
+pilot run). Next: generalized sweeps (L38–L39), then the job runner and SLURM
+scripts (step 4).
 
 ## Setup
 
@@ -50,6 +51,8 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ```bash
 python scripts/plot_cluster.py configs/lattice2d.yaml   # cluster check figure
 python scripts/check_kernel_2d.py                       # kernel validation figure (~15-20 min)
+python scripts/check_capture_2d.py                      # adaptive vs fixed on capture/escape (~10 min)
+python scripts/pilot_2d.py --n 200 --t-max 5000         # pilot run + figure (~5 min)
 pytest
 ```
 

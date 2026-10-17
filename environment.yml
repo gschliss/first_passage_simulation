@@ -9,6 +9,7 @@ dependencies:
   - pyyaml
   - matplotlib
   - pandas
+  - pyarrow
   - pytest
   - jupyter
   - pip
