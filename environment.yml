@@ -1,0 +1,15 @@
+name: fpsim
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pyyaml
+  - matplotlib
+  - pandas
+  - pytest
+  - jupyter
+  - pip
+  - pip:
+      - -e .

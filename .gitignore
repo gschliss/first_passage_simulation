@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Simulation outputs (regenerable; keep the folders)
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Dropbox
+.dropbox
+.dropbox.attr
+Icon?
