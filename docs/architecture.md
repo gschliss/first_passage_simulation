@@ -90,8 +90,9 @@ fixed:
   dt = dt_fixed  (default: the strictest of the limits above for this sweep point)
 ```
 
-`¼` and `0.05` are config values (`accuracy.distance_fraction`,
-`accuracy.max_rate_dt`), fixed across a sweep and halved for the L31 check.
+`¼` (now ⅛ by default, L37) and `0.05` are config values (`stepping.distance_fraction`,
+`stepping.max_rate_dt`), fixed across a sweep and halved for the L31 check.
+Binding and unbinding *times* are exact regardless of dt (L37); dt only controls spatial accuracy.
 
 ## 5. Randomness and reproducibility
 

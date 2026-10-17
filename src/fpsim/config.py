@@ -55,7 +55,7 @@ class Membrane:
 @dataclass(frozen=True)
 class Stepping:
     mode: str = "adaptive"  # "adaptive" or "fixed" (L34)
-    distance_fraction: float = 0.25  # typical move ≤ this × distance to nearest feature (L30)
+    distance_fraction: float = 0.125  # typical move ≤ this × distance to nearest feature (L30, L37)
     max_rate_dt: float = 0.05  # k·dt ≤ this for every active rate (L30)
     dt_cap: float = 1e-2  # s, upper bound on any step (L30)
     dt_fixed: float | None = None  # s; fixed mode only. None = strictest limit for the sweep point (L34)

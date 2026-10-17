@@ -17,6 +17,8 @@ diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
 │   ├── config.py         # typed YAML config + derived rates per sweep point
 │   ├── lattice/          # cell clusters: rings, neighbors, ghost ring, layer factor
 │   ├── receptors.py      # receptor layouts on target cells
+│   ├── kernel/           # Numba per-molecule simulation loops
+│   ├── simulate.py       # config + sweep point -> per-molecule results table
 │   └── viz/              # figures and animations
 ├── configs/              # one YAML per experiment
 ├── scripts/              # command-line entry points and demos
@@ -26,8 +28,9 @@ diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
 └── results/              # outputs and figures (gitignored)
 ```
 
-Build status: step 1 of 6 done (config, 2D lattice, receptors, layer factor).
-The simulation kernel comes next.
+Build status: steps 1–2 of 6 done (config, 2D lattice, receptors, layer factor;
+2D kernel with free/bound switching and the binding layer). Receptors and escape
+come next (step 3).
 
 ## Setup
 
@@ -46,6 +49,7 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 
 ```bash
 python scripts/plot_cluster.py configs/lattice2d.yaml   # cluster check figure
+python scripts/check_kernel_2d.py                       # kernel validation figure (~15-20 min)
 pytest
 ```
 

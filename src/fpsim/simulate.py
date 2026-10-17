@@ -1,0 +1,90 @@
+"""Python entry point to the kernels: config in, per-molecule results out."""
+
+from __future__ import annotations
+
+import dataclasses
+import time
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+
+from fpsim.config import Config
+from fpsim.kernel.common import MODE_ADAPTIVE, MODE_FIXED, OUTCOME_NAMES, molecule_seeds
+from fpsim.kernel.run2d import run_molecules_2d
+from fpsim.lattice import layer_factor, make_cluster
+
+
+@dataclass
+class Result:
+    molecules: pd.DataFrame  # one row per molecule (docs/architecture.md §6)
+    trajectories: np.ndarray  # (n_traj, n_frames, 4): x, y, state, cell
+    meta: dict = field(default_factory=dict)
+
+
+def strictest_dt(cfg: Config, k_layer: float, k_off: float) -> float:
+    """Default fixed-mode step: the smallest adaptive limit at this sweep point (L34)."""
+    s, d = cfg.stepping, cfg.diffusion
+    dt_layer = min((s.distance_fraction * cfg.membrane.binding_layer) ** 2 / (2 * d.d_free),
+                   s.max_rate_dt / k_layer)
+    return min(dt_layer, s.max_rate_dt / k_off, s.dt_cap)
+
+
+def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, t_max: float | None = None,
+             seed: int | None = None, n_trajectories: int | None = None, first_id: int = 0) -> Result:
+    if cfg.geometry.dim != 2:
+        raise NotImplementedError("3D kernel comes in build step 5")
+    g, run, st = cfg.geometry, cfg.run, cfg.stepping
+    n = n_molecules or run.n_molecules
+    t_max = t_max or run.t_max
+    seed = run.seed if seed is None else seed
+    n_traj = run.n_trajectories if n_trajectories is None else n_trajectories
+
+    cluster = make_cluster(g)
+    factor = layer_factor(g.dim, g.cell_radius, g.spacing, cfg.membrane.binding_layer)
+    sp = cfg.sweep_point(sweep_index, factor)
+    mode = MODE_FIXED if st.mode == "fixed" else MODE_ADAPTIVE
+    dt_fixed = st.dt_fixed if st.dt_fixed is not None else strictest_dt(cfg, sp.k_layer, sp.k_off)
+    seeds = molecule_seeds(seed, sweep_index, n, first_id)
+
+    t0 = time.time()
+    (outcome, t_end, start_state, final_state, final_cell, start_xy, end_xy,
+     time_free, n_trips, n_cell_changes, n_steps, traj) = run_molecules_2d(
+        seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
+        g.cell_radius, cfg.membrane.binding_layer,
+        cfg.diffusion.d_free, cfg.diffusion.d_bound, cfg.membrane.free_fraction,
+        sp.k_off, sp.k_layer,
+        mode, dt_fixed, st.distance_fraction, st.max_rate_dt, st.dt_cap,
+        t_max, n_traj, run.trajectory_interval,
+    )
+    wall = time.time() - t0
+
+    molecules = pd.DataFrame({
+        "molecule_id": np.arange(first_id, first_id + n),
+        "seed": seeds,
+        "outcome": pd.Categorical([OUTCOME_NAMES[o] for o in outcome], categories=list(OUTCOME_NAMES.values())),
+        "t_end": t_end,
+        "start_state": np.where(start_state == 1, "bound", "free"),
+        "final_state": np.where(final_state == 1, "bound", "free"),
+        "final_cell": final_cell,
+        "final_ring": cluster.ring[final_cell],
+        "x0": start_xy[:, 0], "y0": start_xy[:, 1],
+        "x1": end_xy[:, 0], "y1": end_xy[:, 1],
+        "time_free": time_free,
+        "n_trips": n_trips,  # unbinding events (excludes a free start)
+        "n_cell_changes": n_cell_changes,
+        "n_steps": n_steps,
+    })
+    meta = {
+        "config": cfg.to_dict(),
+        "sweep_index": sweep_index,
+        "sweep_point": dataclasses.asdict(sp),
+        "layer_factor": factor,
+        "stepping_mode": st.mode,
+        "dt_fixed": dt_fixed if mode == MODE_FIXED else None,
+        "n_molecules": n,
+        "t_max": t_max,
+        "seed": seed,
+        "wall_time_s": wall,
+    }
+    return Result(molecules=molecules, trajectories=traj, meta=meta)

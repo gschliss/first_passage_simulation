@@ -90,6 +90,7 @@ and is a draft/validation case only.
 | L34 | Stepping toggle | Time stepping is a **single config switch**: `time_stepping: adaptive` or `fixed`. In `fixed` mode every molecule uses one `dt` everywhere: either set explicitly or, by default, the strictest near-feature limit for that sweep point (resolve 10 nm, k·dt ≤ 0.05 for k_layer). Both modes share the same physics code and write the same output format, so runs can be compared directly; output records which mode and settings were used. |
 | L35 | Architecture | Code plan in [architecture.md](architecture.md), approved. Results stored as **Parquet**, one row per molecule. v0.1 draft code to be **removed** (kept in git history). |
 | L36 | Receptor layouts | Receptor rotations drawn **once per job** from its seed and shared by its molecules; layouts differ across jobs, so the ensemble averages over layouts. |
+| L37 | Exact event timing; accuracy default | (1) Unbinding and binding times are **exact**: a bound dwell is drawn from Exp(k_off) when a molecule binds; a free trip binds when accumulated in-layer exposure (k_layer × time in layer) reaches a draw from Exp(1). Replaces per-step coin flips, which lengthened every dwell by ~k·dt/2 (2.5% at k·dt = 0.05). (2) Default **distance_fraction = 0.125** (was 0.25): at 0.25 the 5 ms point's free fraction was 3% low (4.85 ± 0.04%); at 0.125 and 0.0625 all three sweep points give 5% within error (5 ms: 4.96/4.96%; 71 ms: 5.00/4.96%; 1000 ms: 5.08/4.99%), and cell-change fractions agree across settings. The L31 "halved" check is therefore 0.0625. Full check run (`scripts/check_kernel_2d.py`, `results/figures/kernel2d_checks.png`): at 0.125 the free fraction is 4.96 / 5.03 / 5.08% (5 / 71 / 1000 ms) and at 0.0625 4.89 / 4.99 / 4.99%, i.e. within ~2% of 5%, with run-to-run scatter somewhat larger than the quoted errors. Adaptive vs fixed agree within error, but the fixed runs were short (±10–20%). |
 
 Derived geometry (from L1–L2):
 
@@ -114,5 +115,6 @@ freeze with a marker; live survival curve S(t).
       from ≈ k·20.5·√3/2 µm (edge midpoints of the ring) to k·20.5 µm (corners,
       along a row). Report both?
 - [ ] Decoy receptor layout (later).
+- [ ] Sharper adaptive-vs-fixed comparison (L31) with larger fixed-step runs on the cluster.
 - [ ] Cross-check δ = 10 nm against δ = 1 nm in the full lattice at one sweep point (the flat-gap demo already agrees).
 - [ ] What we compare across conditions (MFPT, capture probability, FPT distribution).
