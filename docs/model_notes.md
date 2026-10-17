@@ -83,6 +83,13 @@ and is a draft/validation case only.
 | L27 | Switching sweep | Sweep the **mean bound dwell 1/k_off over 5–1000 ms**, with k_on = 19·k_off (L23). Sparse first pass: **5, 71, 1000 ms** (k_on = 3800, 269, 19 s⁻¹). |
 | L28 | Binding layer | **Option 3.** Free molecules can bind only within **δ = 10 nm** of a membrane, at rate `k_layer = k_on · V_free / V_layer` (for a flat gap of width W: `k_on · W / (2δ)`), then insert at the nearest membrane point. Because the layer's share of free space is geometric, `k_layer` is computed, not tuned, and the free fraction stays exactly 5%. Demo (`scripts/demo_binding_models.py`, `results/sketches/binding_models_demo.png`): same mean trip as the rate model, but a heavy tail of rare long trips (99th-percentile displacement up to ~10× farther at 5 ms); 10 nm and 1 nm (≈ contact) layers give nearly identical results. |
 | L29 | Layer factor | `V_free / V_layer` per cell of the infinite lattice: **79.2 in 2D** (49.79 µm² free, 0.6286 µm² layer) and **151.3 in 3D** (1903 µm³ free, 12.58 µm³ layer), so `k_layer = 79.2·k_on` (2D) and `151.3·k_on` (3D). Checked in 2D with `scripts/demo_cell_hopping.py`: 300 s runs gave 5.0% and 6.3% time free (target 5%; heavy-tailed trips make this noisy). In those runs (1000 ms dwell, started at a slit), 156 of 571 free trips (27%) ended on a different cell. |
+| L30 | Time stepping | **Adaptive time steps.** Each step's dt is the largest value satisfying all of: (a) typical move √(2·D·dt) ≤ **¼ of the distance to the nearest feature** (membrane/binding layer, receptor, escape line); (b) **k·dt ≤ 0.05** for every rate active at the molecule's location (k_layer inside the layer, k_off when bound); (c) a global cap. Unbinding uses the exact per-step probability 1 − e^(−k_off·dt). The two accuracy settings (¼, 0.05) are **fixed across the sweep**, so residual error has the same relative size at every sweep point. |
+| L31 | Validation of L30 | Before using results: (1) **halve the accuracy settings** (⅛, 0.025) at both sweep ends (5 ms, 1000 ms); capture probability, MFPT and free fraction must agree within statistical error; (2) compare against a **fixed-small-step reference** on a small problem (single slit / 7-cell patch); (3) report the **time-averaged free fraction** on every run (target 5%) as a drift check. |
+| L32 | Language | Simulator core in **Numba** (compiled per-molecule loops, parallel over molecules on CPU). GPU (`numba.cuda`) only if needed later. |
+| L33 | Running | **Same entry point locally and on the cluster.** Cluster: **SLURM**, with job arrays over seeds and sweep points; each job writes its own results file, merged afterwards. Local: same command, small molecule counts, for testing. GPU availability not assumed. |
+| L34 | Stepping toggle | Time stepping is a **single config switch**: `time_stepping: adaptive` or `fixed`. In `fixed` mode every molecule uses one `dt` everywhere: either set explicitly or, by default, the strictest near-feature limit for that sweep point (resolve 10 nm, k·dt ≤ 0.05 for k_layer). Both modes share the same physics code and write the same output format, so runs can be compared directly; output records which mode and settings were used. |
+| L35 | Architecture | Code plan in [architecture.md](architecture.md), approved. Results stored as **Parquet**, one row per molecule. v0.1 draft code to be **removed** (kept in git history). |
+| L36 | Receptor layouts | Receptor rotations drawn **once per job** from its seed and shared by its molecules; layouts differ across jobs, so the ensemble averages over layouts. |
 
 Derived geometry (from L1–L2):
 
@@ -108,8 +115,4 @@ freeze with a marker; live survival curve S(t).
       along a row). Report both?
 - [ ] Decoy receptor layout (later).
 - [ ] Cross-check δ = 10 nm against δ = 1 nm in the full lattice at one sweep point (the flat-gap demo already agrees).
-- [ ] Algorithm: 10 nm capture radius needs steps of ~3 nm with naive Brownian steps
-      (dt ≈ 4.5e-7 s at D = 10 µm²/s), far too slow for searches lasting seconds. Need adaptive
-      steps and/or exact crossing tests, or an event-driven scheme. Decide after rates are set.
-- [ ] Receptor layout: redrawn each run, or fixed per seed?
 - [ ] What we compare across conditions (MFPT, capture probability, FPT distribution).
