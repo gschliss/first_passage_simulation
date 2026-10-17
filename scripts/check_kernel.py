@@ -1,16 +1,19 @@
-"""Statistical validation of the 2D kernel (build step 2; L31, L37).
+"""Statistical validation of the kernel, 2D or 3D (L31, L37).
 
   A. Free fraction vs accuracy setting at each sweep point (target 5%).
-  B. Fraction of free trips ending on a different cell: adaptive vs fixed vs the
-     independent pure-Python hop demo (scripts/demo_cell_hopping.py).
+  B. Fraction of free trips ending on a different cell: adaptive vs fixed, plus (2D only)
+     the independent pure-Python hop demo (scripts/demo_cell_hopping.py).
   C. Adaptive / fixed ratios of free fraction and spreading (mean squared displacement).
   D. Cost: steps per molecule per simulated second, adaptive vs fixed.
+Runs are short (≤ 200 s), so few molecules reach a receptor; these checks are about
+the free/bound switching and the step-size settings.
 
-Writes results/checks/kernel2d_checks.csv and results/figures/kernel2d_checks.png.
+Writes results/checks/kernel_<config name>.csv and results/figures/kernel_<config name>.png.
 
 Usage:
-    python scripts/check_kernel_2d.py            # ~15-20 min on 8 cores
-    python scripts/check_kernel_2d.py --quick    # smaller samples, for a smoke test
+    python scripts/check_kernel.py --config configs/lattice2d.yaml          # ~15-20 min on 8 cores
+    python scripts/check_kernel.py --config configs/lattice3d.yaml --quick  # smaller samples
+    python scripts/check_kernel.py --config configs/lattice3d.yaml --replot
 """
 
 from __future__ import annotations
@@ -30,7 +33,6 @@ from fpsim.config import Stepping
 from fpsim.simulate import simulate
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG = PROJECT_ROOT / "configs" / "lattice2d.yaml"
 COLORS = {"5 ms": "#1f77b4", "71 ms": "#ff7f0e", "1000 ms": "#2ca02c"}
 
 
@@ -41,7 +43,8 @@ def label(dwell):
 def summarize(r, **extra):
     m = r.molecules
     f = m.time_free / m.t_end
-    disp2 = ((m.x1 - m.x0) ** 2 + (m.y1 - m.y0) ** 2) / m.t_end  # µm²/s per molecule
+    axes = [a for a in "xyz" if f"{a}0" in m]
+    disp2 = sum((m[f"{a}1"] - m[f"{a}0"]) ** 2 for a in axes) / m.t_end  # µm²/s per molecule
     free_periods = m.n_trips + (m.start_state == "free")
     p = m.n_cell_changes.sum() / free_periods.sum()
     return dict(
@@ -83,7 +86,7 @@ def demo_reference(t_max, seeds):
     return dict(dwell=1.0, mode="demo", check="demo", cell_change=p, cell_change_se=np.sqrt(p * (1 - p) / trips))
 
 
-def plot(df, out):
+def plot(df, out, name):
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     acc = df[df.check == "accuracy"]
 
@@ -97,7 +100,7 @@ def plot(df, out):
     ax.axhline(5, color="k", ls="--", lw=1, label="target 5%")
     ax.set_xlabel("distance_fraction (smaller = finer steps)")
     ax.set_ylabel("time spent free (%)")
-    ax.set_title("A. Free fraction: within ~2% of 5% at the default (0.125);\n0.25 is ~3% low at 5 ms")
+    ax.set_title("A. Free fraction vs accuracy setting (target 5%)")
     ax.legend()
 
     ax = axes[0, 1]
@@ -113,7 +116,7 @@ def plot(df, out):
     ax.set_xticks(range(3), ["5 ms", "71 ms", "1000 ms"])
     ax.set_xlabel("mean bound dwell")
     ax.set_ylabel("fraction of free trips ending on a new cell")
-    ax.set_title("B. Cell-to-cell hopping: three implementations agree within ~1.5 SE")
+    ax.set_title("B. Cell-to-cell hopping by implementation")
     ax.legend()
 
     ax = axes[1, 0]
@@ -133,7 +136,7 @@ def plot(df, out):
     ax.axhline(1, color="k", ls="--", lw=1)
     ax.set_xticks(range(len(sub)), [label(r[0]) for r in sub])
     ax.set_ylabel("adaptive / fixed")
-    ax.set_title("C. Adaptive / fixed (1 = agreement): consistent, but fixed runs are short,\nso this is a weak test until larger fixed runs (cluster)")
+    ax.set_title("C. Adaptive / fixed (1 = agreement); fixed runs are short,\nso error bars are wide")
     ax.legend()
 
     ax = axes[1, 1]
@@ -151,7 +154,7 @@ def plot(df, out):
     ax.set_title("D. Cost")
     ax.legend(loc="lower left")
 
-    fig.suptitle("2D kernel checks: free/bound switching with 10 nm binding layer (no receptors, no escape)", fontsize=13)
+    fig.suptitle(f"Kernel checks ({name}): free/bound switching with the 10 nm binding layer", fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=140)
     plt.close(fig)
@@ -159,16 +162,17 @@ def plot(df, out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs" / "lattice2d.yaml")
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--replot", action="store_true", help="redraw the figure from the saved CSV")
     args = parser.parse_args()
-    out_csv = PROJECT_ROOT / "results" / "checks" / "kernel2d_checks.csv"
-    out_png = PROJECT_ROOT / "results" / "figures" / "kernel2d_checks.png"
+    cfg = load_config(args.config)
+    out_csv = PROJECT_ROOT / "results" / "checks" / f"kernel_{cfg.name}.csv"
+    out_png = PROJECT_ROOT / "results" / "figures" / f"kernel_{cfg.name}.png"
     if args.replot:
-        plot(pd.read_csv(out_csv), out_png)
+        plot(pd.read_csv(out_csv), out_png, cfg.name)
         print(f"Saved {out_png}")
         return
-    cfg = load_config(CONFIG)
     q = 0.1 if args.quick else 1.0
     rows = []
 
@@ -185,14 +189,15 @@ def main():
         rows.append(r)
         rows.append(run(cfg, i, max(int(n * q), 10), t_max * q, mode="fixed"))
 
-    print("B. independent demo")
-    rows.append(demo_reference(300.0 * q, seeds=[0, 1]))
+    if cfg.geometry.dim == 2:
+        print("B. independent demo")
+        rows.append(demo_reference(300.0 * q, seeds=[0, 1]))
 
     df = pd.DataFrame(rows)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_csv, index=False)
-    plot(df, out_png)
+    plot(df, out_png, cfg.name)
     print(f"Saved {out_csv}\nSaved {out_png}")
 
 

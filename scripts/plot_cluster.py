@@ -13,6 +13,7 @@ import numpy as np
 
 from fpsim import load_config, make_cluster, make_receptors
 from fpsim.viz.cluster import plot_cluster_check
+from fpsim.viz.cluster3d import plot_cluster_check_3d
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,14 +25,12 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    if cfg.geometry.dim != 2:
-        raise SystemExit("check figure is 2D only for now")
     cluster = make_cluster(cfg.geometry)
     receptors = make_receptors(cluster, cfg.geometry.target_ring, cfg.receptors.n_per_cell,
                                cfg.receptors.capture_radius, np.random.default_rng(cfg.run.seed))
     out = args.out or PROJECT_ROOT / "results" / "figures" / f"{cfg.name}_cluster_check.png"
     out.parent.mkdir(parents=True, exist_ok=True)
-    plot_cluster_check(cfg, cluster, receptors, out)
+    (plot_cluster_check if cfg.geometry.dim == 2 else plot_cluster_check_3d)(cfg, cluster, receptors, out)
     print(f"Saved {out}")
 
 

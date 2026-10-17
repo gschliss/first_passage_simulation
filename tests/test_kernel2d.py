@@ -1,6 +1,6 @@
 """Fast checks of the 2D kernel (build step 2: free/bound states and binding layer).
 
-Slower, statistical validation lives in scripts/check_kernel_2d.py.
+Slower, statistical validation lives in scripts/check_kernel.py.
 """
 
 import dataclasses

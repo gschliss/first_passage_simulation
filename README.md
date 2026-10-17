@@ -52,10 +52,10 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ## Usage
 
 ```bash
-python scripts/plot_cluster.py configs/lattice2d.yaml   # cluster check figure
-python scripts/check_kernel_2d.py                       # kernel validation figure (~15-20 min)
-python scripts/check_capture_2d.py                      # adaptive vs fixed on capture/escape (~10 min)
-python scripts/pilot_2d.py --n 200 --t-max 5000         # pilot run + figure (~5 min)
+python scripts/plot_cluster.py configs/lattice2d.yaml                  # cluster check figure (2D or 3D config)
+python scripts/check_kernel.py --config configs/lattice2d.yaml         # kernel validation figure (~15-20 min)
+python scripts/check_capture.py --dim 2                                # adaptive vs fixed on capture/escape
+python scripts/pilot.py --config configs/lattice2d.yaml --n 200 --t-max 5000   # pilot run + figure
 pytest
 ```
 

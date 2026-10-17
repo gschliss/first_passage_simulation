@@ -1,11 +1,12 @@
-"""Pilot run of the full 2D model: search times, capture vs escape, and cost (build step 3).
+"""Pilot run of the full model (2D or 3D): search times, capture vs escape, and cost.
 
-Runs configs/lattice2d.yaml at each sweep point with a long t_max, records a few
+Runs three points of the config's "dwell" sweep with a long t_max, records a few
 trajectories for pictures, and saves everything under results/pilot/.
 
 Usage:
-    python scripts/pilot_2d.py --n 200 --t-max 5000
-    python scripts/pilot_2d.py --replot
+    python scripts/pilot.py --config configs/lattice2d.yaml --n 200 --t-max 5000
+    python scripts/pilot.py --config configs/lattice3d.yaml --n 200 --t-max 5000
+    python scripts/pilot.py --config configs/lattice3d.yaml --replot
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from fpsim.viz.cluster import draw_cells, escape_mask
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUT = PROJECT_ROOT / "results" / "pilot"
-CONFIG = PROJECT_ROOT / "configs" / "lattice2d.yaml"
 PILOT_DWELLS = (0.005, 0.0707, 1.0)  # s; points of the "dwell" sweep used for the pilot (L40)
 
 
@@ -32,11 +32,14 @@ def pilot_points(cfg):
     return [cfg.find_point("dwell", bound_dwell=d) for d in PILOT_DWELLS]
 
 
-def run_all(n, t_max, n_traj):
-    cfg = load_config(CONFIG)
+def stem(cfg, i):
+    return OUT / f"pilot_{cfg.name}_sweep{i}"
+
+
+def run_all(cfg, n, t_max, n_traj):
     for i, dwell in zip(pilot_points(cfg), PILOT_DWELLS):
         r = simulate(cfg, i, n_molecules=n, t_max=t_max, n_trajectories=n_traj)
-        save_result(r, OUT / f"pilot2d_sweep{i}")
+        save_result(r, stem(cfg, i))
         m = r.molecules
         c = m.outcome.value_counts()
         molecule_s = m.t_end.sum()
@@ -45,10 +48,23 @@ def run_all(n, t_max, n_traj):
               f"for {molecule_s:.3g} molecule-s", flush=True)
 
 
-def plot(out):
-    cfg = load_config(CONFIG)
+def draw_background(ax, cfg, cluster, r, lost, X, Y):
+    if cfg.geometry.dim == 2:
+        ax.contourf(X, Y, lost.astype(float), levels=[0.5, 1.5], colors=["#fde0c5"])
+        draw_cells(ax, cluster, cfg.geometry.target_ring, labels=False)
+        cells = np.array(r.meta["receptor_cells"]); angles = np.array(r.meta["receptor_angles"])
+        rec = cluster.centers[cells][:, None, :] + cluster.cell_radius * np.stack([np.cos(angles), np.sin(angles)], -1)
+        ax.plot(rec[..., 0].ravel(), rec[..., 1].ravel(), "k.", ms=3)
+    else:  # x-y projection: target and source cells as outlines
+        c = cluster.centers
+        for i in np.flatnonzero(cluster.ring == cfg.geometry.target_ring):
+            ax.add_patch(plt.Circle(c[i, :2], cluster.cell_radius, fill=False, ec="#b22222", lw=0.5, alpha=0.5))
+        ax.add_patch(plt.Circle(c[cluster.source, :2], cluster.cell_radius, fc="#a6c8f4", ec="#1f4e9c"))
+
+
+def plot(cfg, out):
     cluster = make_cluster(cfg.geometry)
-    results = [load_result(OUT / f"pilot2d_sweep{i}") for i in pilot_points(cfg)]
+    results = [load_result(stem(cfg, i)) for i in pilot_points(cfg)]
     t_max = results[0].meta["t_max"]
 
     fig = plt.figure(figsize=(17, 11))
@@ -57,14 +73,10 @@ def plot(out):
     # Top: example paths at each sweep point
     extent = (cluster.rings + 1.6) * cluster.spacing
     X, Y = np.meshgrid(np.linspace(-extent, extent, 700), np.linspace(-extent, extent, 700))
-    lost = escape_mask(cluster, X, Y)
+    lost = escape_mask(cluster, X, Y) if cfg.geometry.dim == 2 else None
     for k, (r, dwell) in enumerate(zip(results, PILOT_DWELLS)):
         ax = fig.add_subplot(gs[0, k])
-        ax.contourf(X, Y, lost.astype(float), levels=[0.5, 1.5], colors=["#fde0c5"])
-        draw_cells(ax, cluster, cfg.geometry.target_ring, labels=False)
-        cells = np.array(r.meta["receptor_cells"]); angles = np.array(r.meta["receptor_angles"])
-        rec = cluster.centers[cells][:, None, :] + cluster.cell_radius * np.stack([np.cos(angles), np.sin(angles)], -1)
-        ax.plot(rec[..., 0].ravel(), rec[..., 1].ravel(), "k.", ms=3)
+        draw_background(ax, cfg, cluster, r, lost, X, Y)
         m = r.molecules
         for j, tr in enumerate(r.trajectories):
             ok = np.isfinite(tr[:, 0])
@@ -78,7 +90,8 @@ def plot(out):
             ax.plot(*pts[-1], {"captured": "*", "escaped": "X", "timeout": "o"}[end], ms=11 if end == "captured" else 8,
                     color=col, mec="k", zorder=5)
         ax.set_xlim(-extent, extent); ax.set_ylim(-extent, extent); ax.set_aspect("equal"); ax.axis("off")
-        ax.set_title(f"bound dwell {dwell * 1e3:.0f} ms: {len(r.trajectories)} example molecules\n"
+        proj = "" if cfg.geometry.dim == 2 else " (x–y projection; red = ring-3 targets)"
+        ax.set_title(f"bound dwell {dwell * 1e3:.0f} ms: {len(r.trajectories)} example molecules{proj}\n"
                      "★ captured, ✕ escaped, ● still searching", fontsize=10)
 
     # Bottom left: cumulative capture and escape
@@ -124,7 +137,7 @@ def plot(out):
     ax.set_title("Cost")
 
     n = len(results[0].molecules)
-    fig.suptitle(f"Pilot, 2D model (lattice2d.yaml): {n} molecules per sweep point, t_max = {t_max:.0f} s", fontsize=13)
+    fig.suptitle(f"Pilot, {cfg.geometry.dim}D model ({cfg.name}): {n} molecules per sweep point, t_max = {t_max:.0f} s", fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=140)
     plt.close(fig)
@@ -132,16 +145,18 @@ def plot(out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs" / "lattice2d.yaml")
     parser.add_argument("--n", type=int, default=200)
     parser.add_argument("--t-max", type=float, default=5000.0)
     parser.add_argument("--n-traj", type=int, default=6)
     parser.add_argument("--replot", action="store_true")
     args = parser.parse_args()
+    cfg = load_config(args.config)
     if not args.replot:
-        run_all(args.n, args.t_max, args.n_traj)
-    out = PROJECT_ROOT / "results" / "figures" / "pilot2d.png"
+        run_all(cfg, args.n, args.t_max, args.n_traj)
+    out = PROJECT_ROOT / "results" / "figures" / f"pilot_{cfg.name}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
-    plot(out)
+    plot(cfg, out)
     print(f"Saved {out}")
 
 

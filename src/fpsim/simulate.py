@@ -12,14 +12,15 @@ import pandas as pd
 from fpsim.config import Config
 from fpsim.kernel.common import MODE_ADAPTIVE, MODE_FIXED, OUTCOME_NAMES, molecule_seeds
 from fpsim.kernel.run2d import run_molecules_2d
+from fpsim.kernel.run3d import run_molecules_3d
 from fpsim.lattice import layer_factor, make_cluster
-from fpsim.receptors import make_receptors
+from fpsim.receptors import make_grid, make_receptors
 
 
 @dataclass
 class Result:
     molecules: pd.DataFrame  # one row per molecule (docs/architecture.md §6)
-    trajectories: np.ndarray  # (n_traj, n_frames, 4): x, y, state, cell
+    trajectories: np.ndarray  # (n_traj, n_frames, dim + 2): position, state, cell
     meta: dict = field(default_factory=dict)
 
 
@@ -40,8 +41,6 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
     into chunks. ``layout_index`` picks the receptor layout: one layout per job (L36),
     drawn from (seed, sweep_index, layout_index) and independent of ``first_id``.
     """
-    if cfg.geometry.dim != 2:
-        raise NotImplementedError("3D kernel comes in build step 5")
     g, run, st = cfg.geometry, cfg.run, cfg.stepping
     n = n_molecules or run.n_molecules
     t_max = t_max or run.t_max
@@ -56,20 +55,24 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
     seeds = molecule_seeds(seed, sweep_index, n, first_id)
     receptors = make_receptors(cluster, g.target_ring, cfg.receptors.n_per_cell, cfg.receptors.capture_radius,
                                np.random.default_rng([seed, sweep_index, layout_index]))
-    phis = np.arctan2(receptors.directions[..., 1], receptors.directions[..., 0])
+    lattice = (seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
+               cluster.ring, cluster.rings, cluster.spacing)
+    physics = (g.cell_radius, cfg.membrane.binding_layer, cfg.diffusion.d_free, cfg.diffusion.d_bound,
+               sp.free_fraction, sp.k_off, sp.k_layer,
+               mode, dt_fixed, st.distance_fraction, st.max_rate_dt, st.dt_cap,
+               t_max, n_traj, run.trajectory_interval)
 
     t0 = time.time()
-    (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_xy, end_xy,
-     time_free, n_trips, n_cell_changes, n_steps, traj) = run_molecules_2d(
-        seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
-        cluster.ring, cluster.rings, cluster.spacing,
-        phis, receptors.block_of_cell, receptors.capture_radius,
-        g.cell_radius, cfg.membrane.binding_layer,
-        cfg.diffusion.d_free, cfg.diffusion.d_bound, sp.free_fraction,
-        sp.k_off, sp.k_layer,
-        mode, dt_fixed, st.distance_fraction, st.max_rate_dt, st.dt_cap,
-        t_max, n_traj, run.trajectory_interval,
-    )
+    if g.dim == 2:
+        phis = np.arctan2(receptors.directions[..., 1], receptors.directions[..., 0])
+        out = run_molecules_2d(*lattice, phis, receptors.block_of_cell, receptors.capture_radius, *physics)
+    else:
+        grid = make_grid(receptors.base)
+        out = run_molecules_3d(*lattice, np.ascontiguousarray(receptors.rotations), receptors.block_of_cell,
+                               receptors.base, grid.start, grid.index, grid.n, grid.box,
+                               receptors.capture_radius, *physics)
+    (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_pos, end_pos,
+     time_free, n_trips, n_cell_changes, n_steps, traj) = out
     wall = time.time() - t0
 
     molecules = pd.DataFrame({
@@ -82,8 +85,8 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "final_cell": final_cell,
         "final_ring": cluster.ring[final_cell],
         "receptor_id": receptor_id,  # index on the capturing cell, -1 if not captured
-        "x0": start_xy[:, 0], "y0": start_xy[:, 1],
-        "x1": end_xy[:, 0], "y1": end_xy[:, 1],
+        **{f"{ax}0": start_pos[:, k] for k, ax in enumerate("xyz"[: g.dim])},
+        **{f"{ax}1": end_pos[:, k] for k, ax in enumerate("xyz"[: g.dim])},
         "time_free": time_free,
         "n_trips": n_trips,  # unbinding events (excludes a free start)
         "n_cell_changes": n_cell_changes,
@@ -101,7 +104,8 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "seed": seed,
         "layout_index": layout_index,
         "receptor_cells": receptors.cells.tolist(),
-        "receptor_angles": phis.tolist(),
+        "receptor_rotations": receptors.rotations.tolist(),
+        **({"receptor_angles": phis.tolist()} if g.dim == 2 else {}),
         "wall_time_s": wall,
     }
     return Result(molecules=molecules, trajectories=traj, meta=meta)
