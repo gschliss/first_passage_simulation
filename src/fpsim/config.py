@@ -104,6 +104,7 @@ class Sweep:
 DEFAULT_SWEEPS = (
     Sweep("dwell", free_fraction=0.05, bound_dwell=(0.005, 0.0707, 0.285, 1.0)),  # L27, L39
     Sweep("free_fraction", free_dwell=0.015, free_fraction=(0.01, 0.05, 0.10, 0.20, 0.40)),  # L38
+    Sweep("dwell_10pct", free_fraction=0.10, bound_dwell=(0.005, 0.030, 0.135, 0.5, 1.0)),  # L45
 )
 
 

@@ -22,7 +22,8 @@ import pandas as pd
 RAMP = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"]
 INK, MUTED, GRID = "#1f1f1f", "#6b6b6b", "#e6e6e6"
 SWEPT = {"free_fraction": ("free_fraction", "fraction free", lambda v: f"{v:.0%} free"),
-         "dwell": ("bound_dwell", "mean bound dwell (s)", lambda v: f"{v * 1e3:.0f} ms bound")}
+         "dwell": ("bound_dwell", "mean bound dwell (ms), 5% free", lambda v: f"{v * 1e3:.0f} ms bound"),
+         "dwell_10pct": ("bound_dwell", "mean bound dwell (ms), 10% free", lambda v: f"{v * 1e3:.0f} ms bound")}
 
 
 def ramp(n):

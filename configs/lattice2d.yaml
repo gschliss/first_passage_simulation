@@ -33,7 +33,7 @@ run:
   n_trajectories: 0
   trajectory_interval: 0.05
 
-# Sweep points, numbered in order across sweeps (0-8). Each sweep gives two of
+# Sweep points, numbered in order across sweeps (0-13). Each sweep gives two of
 # free_fraction, bound_dwell (s, 1/k_off) and free_dwell (s, 1/k_on); one may be a list.
 sweeps:
   dwell:                   # 5% free, vary the bound dwell [L23, L27, L39]
@@ -42,3 +42,6 @@ sweeps:
   free_fraction:           # free trips fixed at 15 ms, vary the free fraction [L38]
     free_dwell: 0.015
     free_fraction: [0.01, 0.05, 0.10, 0.20, 0.40]
+  dwell_10pct:             # 10% free, vary the bound dwell [L45]
+    free_fraction: 0.10
+    bound_dwell: [0.005, 0.030, 0.135, 0.5, 1.0]
