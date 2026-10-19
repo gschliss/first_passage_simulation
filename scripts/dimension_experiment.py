@@ -129,89 +129,84 @@ def ratio(a, b, sa, sb):
     return r, r * np.hypot(sa / a, sb / b)
 
 
-def plot(out, cal, check, s, molecules, title):
+def plot(out, cal, check, s, molecules, title, size=SIZES[0], t_min=100.0):
+    """Switching vs free-only reference at one target size (L52 replot: size comparison dropped)."""
     plt.rcParams.update({"font.size": 9.5, "text.color": INK, "axes.labelcolor": INK})
     fig = plt.figure(figsize=(18, 10))
     gs = fig.add_gridspec(2, 4, height_ratios=[1, 1])
     sw = cal[cal.role == "switch"].reset_index(drop=True)
+    m = molecules[size]
+    d = s[s.size_nm == round(size * 1e3)]
+    roles = (("switch", BLUE, "o", "switching (5% free)"), ("reference", ORANGE, "s", "free-only, same D_eff"))
 
-    # Top: cumulative capture per switching point
+    # Top: cumulative capture per switching point, from t_min on
+    t = np.logspace(np.log10(t_min), np.log10(m.t_end.max()), 400)
     for k, dwell in enumerate(DWELLS):
         ax = fig.add_subplot(gs[0, k])
-        t = np.logspace(-1, np.log10(max(m.t_end.max() for m in molecules.values())), 400)
-        for a, ls in zip(SIZES, ("-", "--")):
-            m = molecules[a]
-            for role, color, idx in (("switch", BLUE, k), ("reference", ORANGE, len(DWELLS) + k)):
-                sel = m[m.sweep_index == idx]
-                times = np.sort(sel.t_end[sel.outcome == "captured"].to_numpy())
-                f = np.searchsorted(times, t, side="right") / len(sel)
-                ax.plot(t, f, ls, color=color, lw=2,
-                        label=f"{'switching' if role == 'switch' else 'free-only reference'}, {a * 1e3:.0f} nm")
+        for role, color, _, label in roles:
+            sel = m[m.sweep_index == (k if role == "switch" else len(DWELLS) + k)]
+            times = np.sort(sel.t_end[sel.outcome == "captured"].to_numpy())
+            f = np.searchsorted(times, t, side="right") / len(sel)
+            half = 1.96 * np.sqrt(f * (1 - f) / len(sel))
+            ax.fill_between(t, f - half, f + half, color=color, alpha=0.15, lw=0)
+            ax.plot(t, f, color=color, lw=2, label=f"{label} (n = {len(sel)})")
         ax.set_xscale("log")
+        ax.set_xlim(t_min, t[-1])
         ax.set_ylim(0, 1.02)
         ax.set_xlabel("time since release (s)")
         if k == 0:
             ax.set_ylabel("fraction captured")
             ax.legend(fontsize=8, frameon=False, loc="upper left")
-        ax.set_title(f"bound {dwell * 1e3:.0f} ms (5% free)\nD_eff = {sw.d_eff[k]:.2f} µm²/s", loc="left", fontsize=10)
+        ax.set_title(f"bound {dwell * 1e3:.0f} ms, free {dwell * FREE_FRACTION / (1 - FREE_FRACTION) * 1e3:.2g} ms\n"
+                     f"D_eff = {sw.d_eff[k]:.2f} µm²/s (bands: 95% CI)", loc="left", fontsize=10)
         style(ax)
 
     x = np.arange(len(DWELLS))
-    xt = [f"{d * 1e3:.0f}" for d in DWELLS]
+    xt = [f"{v * 1e3:.0f}" for v in DWELLS]
+
+    def paired(ax, ycol, secol, ylabel, panel_title):
+        for off, (role, color, mk, label) in zip((-0.09, 0.09), roles):
+            r = d[d.role == role].sort_values("bound_dwell")
+            ax.errorbar(x + off, r[ycol], yerr=1.96 * r[secol], fmt=mk, color=color, ms=8, capsize=3, lw=1.5, label=label)
+        ax.set_xticks(x, xt)
+        ax.set_xlabel("bound dwell of the switching walker (ms)")
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(bottom=0)
+        ax.set_title(panel_title, loc="left", fontsize=10)
+        ax.legend(fontsize=8, frameon=False, loc="lower left")
+        style(ax)
 
     # Bottom 1: D_eff matching
     ax = fig.add_subplot(gs[1, 0])
-    ax.errorbar(x - 0.08, sw.d_eff, yerr=1.96 * sw.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3, label="switching")
-    ax.errorbar(x + 0.08, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8, capsize=3, label="free-only reference")
-    naive = FREE_FRACTION * 10.0 + (1 - FREE_FRACTION) * 0.5
-    ax.axhline(naive, color=MUTED, ls=":", lw=1)
-    ax.annotate(f"naive f·D_free + (1−f)·D_bound = {naive:.2f}", (x[-1], naive), xytext=(0, 4), textcoords="offset points",
-                ha="right", fontsize=8, color=MUTED)
-    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell (ms)"); ax.set_ylabel("measured D_eff (µm²/s, 95% CI)")
-    ax.set_ylim(0, max(naive, sw.d_eff.max()) * 1.25)
-    ax.set_title("A. Long-range spreading is matched", loc="left", fontsize=10)
+    ax.errorbar(x - 0.09, sw.d_eff, yerr=1.96 * sw.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3, label=roles[0][3])
+    ax.errorbar(x + 0.09, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8, capsize=3, label=roles[1][3])
+    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
+    ax.set_ylabel("measured D_eff (µm²/s, 95% CI)"); ax.set_ylim(0, 0.8)
+    ax.set_title("A. Long-range spreading (D_eff) is matched", loc="left", fontsize=10)
     ax.legend(fontsize=8, frameon=False, loc="lower left")
     style(ax)
 
-    # Bottom 2: T_switch / T_reference
-    ax = fig.add_subplot(gs[1, 1])
-    for off, a, mk, ls in zip((-0.08, 0.08), SIZES, ("o", "s"), ("-", "--")):
-        sa, sr = s[(s.size_nm == a * 1e3) & (s.role == "switch")], s[(s.size_nm == a * 1e3) & (s.role == "reference")]
-        r, e = ratio(sa.t_mean.to_numpy(), sr.t_mean.to_numpy(), sa.t_se.to_numpy(), sr.t_se.to_numpy())
-        ax.errorbar(x + off, r, yerr=1.96 * e, fmt=mk + ls, color=BLUE, ms=8, capsize=3, lw=1.5, label=f"{a * 1e3:.0f} nm target")
-    ax.axhline(1, color=MUTED, lw=1)
-    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell (ms)"); ax.set_ylabel("mean capture time: switching / reference")
-    ax.set_title("B. Switching vs plain diffusion at equal D_eff", loc="left", fontsize=10)
-    ax.legend(fontsize=8, frameon=False)
-    style(ax)
+    # Bottom 2 and 3: total and local-search time
+    paired(fig.add_subplot(gs[1, 1]), "t_mean", "t_se", "mean capture time (s, 95% CI)",
+           f"B. Total capture time ({size * 1e3:.0f} nm target)")
+    paired(fig.add_subplot(gs[1, 2]), "local_mean", "local_se", "mean time from first arrival to capture (s, 95% CI)",
+           "C. Local search: at a target cell, finding the receptor")
 
-    # Bottom 3: target-size sensitivity
-    ax = fig.add_subplot(gs[1, 2])
-    for off, role, color, mk in ((-0.08, "switch", BLUE, "o"), (0.08, "reference", ORANGE, "s")):
-        a2 = s[(s.size_nm == 2) & (s.role == role)]
-        a10 = s[(s.size_nm == 10) & (s.role == role)]
-        r, e = ratio(a2.t_mean.to_numpy(), a10.t_mean.to_numpy(), a2.t_se.to_numpy(), a10.t_se.to_numpy())
-        ax.errorbar(x + off, r, yerr=1.96 * e, fmt=mk + "-", color=color, ms=8, capsize=3, lw=1.5,
-                    label="switching" if role == "switch" else "free-only reference")
-    ax.axhline(1, color=MUTED, lw=1)
-    ax.annotate("1 = insensitive to target size (1D-like)", (x[-1], 1), xytext=(0, -12), textcoords="offset points",
-                ha="right", fontsize=8, color=MUTED)
-    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell (ms)"); ax.set_ylabel("capture time ratio, 2 nm / 10 nm target")
-    ax.set_title("C. Sensitivity to target size (dimension signature)", loc="left", fontsize=10)
-    ax.legend(fontsize=8, frameon=False)
-    style(ax)
-
-    # Bottom 4: decomposition at 2 nm
+    # Bottom 4: where the time goes
     ax = fig.add_subplot(gs[1, 3])
-    for off, role, color in ((-0.18, "switch", BLUE), (0.18, "reference", ORANGE)):
-        d = s[(s.size_nm == 2) & (s.role == role)]
-        ax.bar(x + off, d.transport_mean, 0.34, color=color, alpha=0.45, edgecolor="white", lw=2,
-               label=f"{'switching' if role == 'switch' else 'reference'}: reach a target cell")
-        ax.bar(x + off, d.local_mean, 0.34, bottom=d.transport_mean, color=color, edgecolor="white", lw=2,
-               label=f"{'switching' if role == 'switch' else 'reference'}: then find the receptor")
-    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell (ms)"); ax.set_ylabel("mean time (s), 2 nm target")
-    ax.set_title("D. Where the time goes: transport vs local search", loc="left", fontsize=10)
-    ax.legend(fontsize=7.5, frameon=False)
+    for off, (role, color, _, label) in zip((-0.18, 0.18), roles):
+        r = d[d.role == role].sort_values("bound_dwell")
+        ax.bar(x + off, r.transport_mean, 0.34, color=color, alpha=0.4, edgecolor="white", lw=2)
+        ax.bar(x + off, r.local_mean, 0.34, bottom=r.transport_mean, color=color, edgecolor="white", lw=2)
+    from matplotlib.patches import Patch
+    handles = [Patch(color=MUTED, alpha=0.4, label="light: reaching a target cell"),
+               Patch(color=MUTED, label="dark: then finding the receptor")]
+    handles += [Patch(color=color, label=label) for _, color, _, label in roles]
+    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
+    ax.set_ylabel("mean time (s)")
+    ax.set_title("D. Where the time goes (left bar: switching, right: free-only)", loc="left", fontsize=10)
+    ax.legend(handles=handles, fontsize=7.5, frameon=False, loc="upper left", ncol=2)
+    ax.set_ylim(0, (d.transport_mean + d.local_mean).max() * 1.3)
     style(ax)
 
     fig.suptitle(title, fontsize=12)
@@ -255,8 +250,8 @@ def main():
     with pd.option_context("display.width", 220, "display.max_columns", 30, "display.float_format", "{:.4g}".format):
         print(s.to_string(index=False))
     plot(out, cal, check, s, molecules,
-         f"Dimension switching vs plain diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per run, "
-         f"5% free; reference D_free = D_eff / φ, φ = {phi:.3f})")
+         f"Switching vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per run, "
+         f"2 nm target; free-only D_free = D_eff / φ, φ = {phi:.3f})")
     print(f"Saved {out / 'dimension_experiment.png'}")
 
 
