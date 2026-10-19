@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from fpsim.jobs import merge
+
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
 D_BOUND = 0.5  # µm²/s, for the slide-length axis (L20)
 
@@ -29,6 +31,17 @@ def style(ax):
     ax.tick_params(colors=MUTED, labelcolor=INK)
     ax.grid(True, color=GRID, lw=0.8)
     ax.set_axisbelow(True)
+
+
+def load_curves(dirs, size_nm=2):
+    """Per bound dwell: (switching molecules, reference molecules), from each run's capture runs."""
+    out = {}
+    for d in dirs:
+        m = merge(d / f"runs_a{size_nm}nm")[0]
+        dwells = sorted(m[m.sweep == "switch"].bound_dwell.unique())
+        for k, dwell in enumerate(dwells):
+            out[dwell] = (m[m.sweep_index == k], m[m.sweep_index == len(dwells) + k])
+    return dict(sorted(out.items()))
 
 
 def load(dirs):
@@ -50,9 +63,34 @@ def main():
     args = p.parse_args()
 
     paired, s, cal, check = load(args.run_dirs)
+    curves = load_curves(args.run_dirs)
     dw = paired.bound_dwell.to_numpy() * 1e3  # ms
     plt.rcParams.update({"font.size": 10, "text.color": INK, "axes.labelcolor": INK})
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    n_c = len(curves)
+    fig = plt.figure(figsize=(max(14, 3.6 * n_c), 15))
+    outer = fig.add_gridspec(2, 1, height_ratios=[0.8, 2], hspace=0.28, top=0.95)
+    top_gs = outer[0].subgridspec(1, n_c, wspace=0.12)
+    t_max = max(max(a.t_end.max(), b.t_end.max()) for a, b in curves.values())
+    t = np.logspace(2, np.log10(t_max), 400)
+    for k, (dwell, (msw, mref)) in enumerate(curves.items()):
+        ax = fig.add_subplot(top_gs[0, k])
+        for m, color, label in ((msw, BLUE, "switching (5% free)"), (mref, ORANGE, "free-only, same D_eff")):
+            times = np.sort(m.t_end[m.outcome == "captured"].to_numpy())
+            f = np.searchsorted(times, t, side="right") / len(m)
+            half = 1.96 * np.sqrt(f * (1 - f) / len(m))
+            ax.fill_between(t, f - half, f + half, color=color, alpha=0.15, lw=0)
+            ax.plot(t, f, color=color, lw=2, label=f"{label} (n = {len(m)})")
+        ax.set_xscale("log"); ax.set_xlim(t[0], t[-1]); ax.set_ylim(0, 1.02)
+        ax.set_xlabel("time since release (s)")
+        if k == 0:
+            ax.set_ylabel("fraction captured")
+            ax.legend(fontsize=8, frameon=False, loc="upper left")
+        else:
+            ax.tick_params(labelleft=False)
+        ax.set_title(f"bound {dwell * 1e3:g} ms (bands: 95% CI)", loc="left", fontsize=10)
+        style(ax)
+    bottom = outer[1].subgridspec(2, 2, hspace=0.35, wspace=0.18)
+    axes = np.array([[fig.add_subplot(bottom[i, j]) for j in range(2)] for i in range(2)])
 
     ax = axes[0, 0]
     for off, col, mk, color, label in ((0.97, "total", "o", BLUE, "total capture time"),
@@ -104,10 +142,9 @@ def main():
     style(ax)
 
     fig.suptitle("Switching vs non-switching diffusion at equal D_eff (2D, 5% free, ring-2 targets with 2 receptors, "
-                 "2 nm; 200 molecules per condition)", fontsize=12)
-    fig.tight_layout()
+                 "2 nm; 200 molecules per condition)", fontsize=12, y=0.985)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=150)
+    fig.savefig(args.out, dpi=150, bbox_inches="tight")
     print(paired.to_string(index=False))
     print(f"Saved {args.out}")
 
