@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -37,9 +38,16 @@ SIZES = (0.002, 0.010)  # µm capture radius
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
 
 
-def base_config(path):
+def base_config(path, target_ring=None, n_per_cell=None):
     cfg = load_config(path)
-    return dataclasses.replace(cfg, sweeps=(Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS),
+    suffix = ""
+    if target_ring is not None:
+        cfg = dataclasses.replace(cfg, geometry=dataclasses.replace(cfg.geometry, target_ring=target_ring))
+        suffix += f"_ring{target_ring}"
+    if n_per_cell is not None:
+        cfg = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, n_per_cell=n_per_cell))
+        suffix += f"_rec{n_per_cell}"
+    return dataclasses.replace(cfg, name=cfg.name + suffix, sweeps=(Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS),
                                             Sweep("free_unit", free_fraction=1.0, d_free=1.0)))
 
 
@@ -224,11 +232,24 @@ def main():
     p.add_argument("--long-lag", type=float, default=500.0)
     p.add_argument("--replot", action="store_true")
     p.add_argument("--out", type=Path, default=None, help="output directory (default results/dimension/<config name>)")
+    p.add_argument("--target-ring", type=int, default=None, help="override geometry.target_ring")
+    p.add_argument("--receptors-per-cell", type=int, default=None, help="override receptors.n_per_cell")
+    p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
+    p.add_argument("--reuse-calibration", type=Path, default=None,
+                   help="copy calibration CSVs from this run directory; valid because calibration runs have no "
+                        "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
     args = p.parse_args()
 
-    cfg = base_config(args.config)
+    global SIZES
+    SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
+    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell)
     out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
     out.mkdir(parents=True, exist_ok=True)
+    if args.reuse_calibration:
+        for name in ("calibration.csv", "calibration_reference.csv"):
+            if not (out / name).exists():
+                shutil.copy(args.reuse_calibration / name, out / name)
+        print(f"   reusing calibration from {args.reuse_calibration}", flush=True)
 
     print("1. D_eff calibration", flush=True)
     cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
@@ -251,7 +272,8 @@ def main():
         print(s.to_string(index=False))
     plot(out, cal, check, s, molecules,
          f"Switching vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per run, "
-         f"2 nm target; free-only D_free = D_eff / φ, φ = {phi:.3f})")
+         f"{SIZES[0] * 1e3:.0f} nm target, ring-{cfg.geometry.target_ring} targets with {cfg.receptors.n_per_cell} "
+         f"receptors each; free-only D_free = D_eff / φ, φ = {phi:.3f})")
     print(f"Saved {out / 'dimension_experiment.png'}")
 
 
