@@ -1,7 +1,8 @@
 """Is switching between dimensions different from plain diffusion at the same D_eff? (L47-L51)
 
 Steps (each saved under results/dimension/<name>/; finished steps are reused on rerun):
-  1. Calibrate D_eff at each switching point (5% free; bound dwell 5, 71, 285, 1000 ms)
+  1. Calibrate D_eff at each switching point (free fraction --free-fraction, default 5%;
+     bound dwell 5, 71, 285, 1000 ms)
      and the gap-geometry factor phi = D_eff / D for a free-only walker (L50).
   2. Reference walkers: free-only, D_free = D_eff(switching point) / phi, so their long-range
      spreading matches; verify by calibrating them too (L47).
@@ -32,7 +33,7 @@ from fpsim.deff import measure_deff
 from fpsim.jobs import Task, merge, run_task
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DWELLS = (0.005, 0.0707, 0.285, 1.0)  # s, bound dwell at 5% free (same points as the 'dwell' sweep)
+DWELLS = (0.005, 0.0707, 0.285, 1.0)  # s, bound dwell (same values as the 'dwell' sweep)
 FREE_FRACTION = 0.05
 SIZES = (0.002, 0.010)  # µm capture radius
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
@@ -40,7 +41,7 @@ BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e
 
 def base_config(path, target_ring=None, n_per_cell=None):
     cfg = load_config(path)
-    suffix = ""
+    suffix = "" if FREE_FRACTION == 0.05 else f"_f{FREE_FRACTION * 100:g}"
     if target_ring is not None:
         cfg = dataclasses.replace(cfg, geometry=dataclasses.replace(cfg.geometry, target_ring=target_ring))
         suffix += f"_ring{target_ring}"
@@ -145,7 +146,8 @@ def plot(out, cal, check, s, molecules, title, size=SIZES[0], t_min=100.0):
     sw = cal[cal.role == "switch"].reset_index(drop=True)
     m = molecules[size]
     d = s[s.size_nm == round(size * 1e3)]
-    roles = (("switch", BLUE, "o", "switching (5% free)"), ("reference", ORANGE, "s", "free-only, same D_eff"))
+    roles = (("switch", BLUE, "o", f"switching ({FREE_FRACTION * 100:g}% free)"),
+             ("reference", ORANGE, "s", "free-only, same D_eff"))
 
     # Top: cumulative capture per switching point, from t_min on
     t = np.logspace(np.log10(t_min), np.log10(m.t_end.max()), 400)
@@ -234,14 +236,16 @@ def main():
     p.add_argument("--out", type=Path, default=None, help="output directory (default results/dimension/<config name>)")
     p.add_argument("--target-ring", type=int, default=None, help="override geometry.target_ring")
     p.add_argument("--receptors-per-cell", type=int, default=None, help="override receptors.n_per_cell")
+    p.add_argument("--free-fraction", type=float, default=0.05, help="free fraction of the switching walker")
     p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
     p.add_argument("--reuse-calibration", type=Path, default=None,
                    help="copy calibration CSVs from this run directory; valid because calibration runs have no "
                         "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
     args = p.parse_args()
 
-    global SIZES
+    global SIZES, FREE_FRACTION
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
+    FREE_FRACTION = args.free_fraction
     cfg = base_config(args.config, args.target_ring, args.receptors_per_cell)
     out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
     out.mkdir(parents=True, exist_ok=True)
@@ -271,7 +275,7 @@ def main():
     with pd.option_context("display.width", 220, "display.max_columns", 30, "display.float_format", "{:.4g}".format):
         print(s.to_string(index=False))
     plot(out, cal, check, s, molecules,
-         f"Switching vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per run, "
+         f"Switching ({FREE_FRACTION * 100:g}% free) vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per run, "
          f"{SIZES[0] * 1e3:.0f} nm target, ring-{cfg.geometry.target_ring} targets with {cfg.receptors.n_per_cell} "
          f"receptors each; free-only D_free = D_eff / φ, φ = {phi:.3f})")
     print(f"Saved {out / 'dimension_experiment.png'}")
