@@ -113,6 +113,7 @@ dominates over the local search for a 10 nm receptor.
 | L49 | Search decomposition | New per-molecule output: **time of first arrival at any target cell** (enters its binding layer or binds to it), splitting each search into transport and local search; plus the number of separate visits to target cells before capture. |
 | L50 | D_eff calibration | **Measure** D_eff at each switching point from receptor-free runs (long-time spreading per unit time), instead of the naive f·D_free + (1−f)·D_bound; kernel checks suggest it is about half the naive value in 2D. 3D HCP may be anisotropic (in-layer vs across layers), so report both. |
 | L51 | First dimension experiment (2D) | **5% free**; switching points at bound dwell **5, 71, 285, 1000 ms**; each paired with a free-only reference whose **D_free = D_eff / φ**, where φ = (measured D_eff of a free-only walker) / D, since a free walker's long-range spreading is slowed by the gap geometry; reference D_eff is re-measured to confirm the match. Capture runs at **2 nm and 10 nm** targets, **~100 molecules per run**, **6 threads** (2 cores left free). Calibration: 100 molecules × 3000 s, D_eff from time-averaged MSD at lag 500 s (also reported at 50 s). Script: `scripts/dimension_experiment.py`. |
+| L52 | First dimension experiment: results (2D) | `results/figures/dimension_experiment_lattice2d.png`, 100 molecules per run. **D_eff** at 5% free is flat in switching rate: 0.52 / 0.51 / 0.49 / 0.50 µm²/s (5 / 71 / 285 / 1000 ms bound; naive average 0.97); φ = 0.409 ± 0.015; references measured 0.47 / 0.52 / 0.46 / 0.47 (~6% low on average, i.e. φ likely slightly overestimated). **Total capture time** switching / reference ≈ 0.91 / 1.04 / 0.82 / 0.86 (±0.1 SE; 2 nm), so no clear difference overall, because **transport to a target cell is ~75–90% of the search** and is the same for both (transport ratio 0.90–1.15). **Local search** (first arrival at a target cell → capture) is **faster for switching**: ratio 0.58 ± 0.18 / 0.67 ± 0.19 / 0.38 ± 0.09 / 0.68 ± 0.19. **Target-size sensitivity of the local search** (paired 2 nm / 10 nm): reference 1.06 / 1.11 / 1.23 / 1.19 (2D-like, grows as the target shrinks); switching 1.06 / 1.05 / 0.89 / 0.94 (≈ 1, 1D-like). Suggestive of a dimension effect in the final approach, but small samples; in this geometry it is diluted in the total by transport. 60 min on 6 threads. |
 
 Derived geometry (from L1–L2):
 
@@ -137,6 +138,7 @@ freeze with a marker; live survival curve S(t).
       from ≈ k·20.5·√3/2 µm (edge midpoints of the ring) to k·20.5 µm (corners,
       along a row). Report both?
 - [ ] Decoy receptor layout (later).
+- [ ] Make local search a larger share of total capture time (closer targets, fewer receptors) and/or more molecules, so the L52 local-search effect can show in total first-passage time; refine φ.
 - [ ] Sharper adaptive-vs-fixed comparison (L31) with larger fixed-step runs on the cluster.
 - [ ] Cross-check δ = 10 nm against δ = 1 nm in the full lattice at one sweep point (the flat-gap demo already agrees).
 - [ ] What we compare across conditions (MFPT, capture probability, FPT distribution).
