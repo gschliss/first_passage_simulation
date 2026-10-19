@@ -38,12 +38,14 @@ def strictest_dt(cfg: Config, k_layer: float, k_off: float, d_free: float | None
 
 def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, t_max: float | None = None,
              seed: int | None = None, n_trajectories: int | None = None, first_id: int = 0,
-             layout_index: int = 0) -> Result:
+             layout_index: int = 0, layout_seed: int | None = None) -> Result:
     """Simulate ``n_molecules`` for one sweep point.
 
     ``first_id`` offsets molecule ids (and so their RNG seeds) when a sweep point is split
     into chunks. ``layout_index`` picks the receptor layout: one layout per job (L36),
     drawn from (seed, sweep_index, layout_index) and independent of ``first_id``.
+    ``layout_seed`` instead draws the layout from (seed, layout_seed) alone, so different
+    sweep points can share layouts; used to pair conditions on the same receptor layouts (L57).
     """
     g, run, st = cfg.geometry, cfg.run, cfg.stepping
     n = n_molecules or run.n_molecules
@@ -59,7 +61,8 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
     dt_fixed = st.dt_fixed if st.dt_fixed is not None else strictest_dt(cfg, sp.k_layer, sp.k_off, d_free)
     seeds = molecule_seeds(seed, sweep_index, n, first_id)
     receptors = make_receptors(cluster, g.target_ring, cfg.receptors.n_per_cell, cfg.receptors.capture_radius,
-                               np.random.default_rng([seed, sweep_index, layout_index]))
+                               np.random.default_rng([seed, sweep_index, layout_index] if layout_seed is None
+                                                     else [seed, 1_000_003, layout_seed]))
     lattice = (seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
                cluster.ring, cluster.rings, cluster.spacing)
     physics = (g.cell_radius, cfg.membrane.binding_layer, d_free, cfg.diffusion.d_bound,
@@ -110,6 +113,7 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "t_max": t_max,
         "seed": seed,
         "layout_index": layout_index,
+        "layout_seed": layout_seed,
         "receptor_cells": receptors.cells.tolist(),
         "receptor_rotations": receptors.rotations.tolist(),
         **({"receptor_angles": phis.tolist()} if g.dim == 2 else {}),

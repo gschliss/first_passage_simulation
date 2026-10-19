@@ -90,16 +90,44 @@ def verify_reference(cfg, d_ref, out, n, t_max, short_lag, long_lag):
     return df
 
 
-def capture_runs(cfg, d_ref, out, n):
+def capture_runs(cfg, d_ref, out, n, layouts=1):
+    """``layouts`` > 1: each point runs ``layouts`` chunks of n // layouts molecules, chunk c on
+    shared receptor layout c, so switching and reference points see the same layouts (L57)."""
     dirs = {}
     for a in SIZES:
         ecfg = experiment_config(cfg, d_ref, a)
         run_dir = out / f"runs_a{a * 1e3:.0f}nm"
         for i in range(ecfg.n_sweep_points):
-            path = run_task(ecfg, Task(i, 0), n, run_dir)
-            print(f"  a = {a * 1e3:.0f} nm, point {i}: {'done' if path else 'exists'}", flush=True)
+            for c in range(layouts):
+                extra = {"layout_seed": c} if layouts > 1 else {}
+                path = run_task(ecfg, Task(i, c), n // layouts, run_dir, **extra)
+                print(f"  a = {a * 1e3:.0f} nm, point {i}, layout {c}: {'done' if path else 'exists'}", flush=True)
         dirs[a] = run_dir
     return dirs
+
+
+def paired_ratios(m, n_boot=4000, seed=0):
+    """Switching / reference ratio of mean total and local-search time per switching point,
+    with 95% CIs from resampling layouts (chunks) jointly for both walkers (L57)."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for k, dwell in enumerate(DWELLS):
+        per = []
+        for idx in (k, len(DWELLS) + k):
+            c = m[(m.sweep_index == idx) & (m.outcome == "captured")]
+            g = c.assign(local=c.t_end - c.t_first_target).groupby("chunk")
+            per.append(pd.DataFrame({"t_sum": g.t_end.sum(), "l_sum": g.local.sum(), "n": g.size()}))
+        sw, rf = per
+        layouts = sw.index.intersection(rf.index).to_numpy()
+        def ratio_of(sel):
+            a, b = sw.loc[sel], rf.loc[sel]
+            return (a.t_sum.sum() / a.n.sum()) / (b.t_sum.sum() / b.n.sum()), (a.l_sum.sum() / a.n.sum()) / (b.l_sum.sum() / b.n.sum())
+        est = ratio_of(layouts)
+        boot = np.array([ratio_of(rng.choice(layouts, len(layouts))) for _ in range(n_boot)])
+        lo, hi = np.percentile(boot, [2.5, 97.5], axis=0)
+        rows.append(dict(bound_dwell=dwell, n_layouts=len(layouts), total=est[0], total_lo=lo[0], total_hi=hi[0],
+                         local=est[1], local_lo=lo[1], local_hi=hi[1]))
+    return pd.DataFrame(rows)
 
 
 def summarize(out):
@@ -138,8 +166,9 @@ def ratio(a, b, sa, sb):
     return r, r * np.hypot(sa / a, sb / b)
 
 
-def plot(out, cal, check, s, molecules, title, size=SIZES[0], t_min=100.0):
+def plot(out, cal, check, s, molecules, title, size=None, t_min=100.0, paired=None):
     """Switching vs free-only reference at one target size (L52 replot: size comparison dropped)."""
+    size = SIZES[0] if size is None else size
     plt.rcParams.update({"font.size": 9.5, "text.color": INK, "axes.labelcolor": INK})
     fig = plt.figure(figsize=(18, 10))
     gs = fig.add_gridspec(2, 4, height_ratios=[1, 1])
@@ -174,6 +203,22 @@ def plot(out, cal, check, s, molecules, title, size=SIZES[0], t_min=100.0):
     x = np.arange(len(DWELLS))
     xt = [f"{v * 1e3:.0f}" for v in DWELLS]
 
+    # Top right (when there is room): paired switching / free-only ratios over shared layouts
+    if paired is not None and len(DWELLS) < 4:
+        ax = fig.add_subplot(gs[0, 3])
+        for off, col, mk, label in ((-0.09, "total", "o", "total capture time"), (0.09, "local", "D", "local search")):
+            ax.errorbar(x + off, paired[col], yerr=[paired[col] - paired[f"{col}_lo"], paired[f"{col}_hi"] - paired[col]],
+                        fmt=mk, color=BLUE if col == "total" else INK, ms=8, capsize=3, label=label)
+        ax.axhline(1, color=MUTED, lw=1)
+        ax.annotate("1 = no difference", (x[-1] + 0.3, 1), xytext=(0, 4), textcoords="offset points", ha="right",
+                    fontsize=8, color=MUTED)
+        ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
+        ax.set_ylabel("switching / free-only (mean time)")
+        ax.set_title(f"Paired over {int(paired.n_layouts.iloc[0])} shared receptor layouts\n(95% CI, layouts resampled)",
+                     loc="left", fontsize=10)
+        ax.legend(fontsize=8, frameon=False)
+        style(ax)
+
     def paired(ax, ycol, secol, ylabel, panel_title):
         for off, (role, color, mk, label) in zip((-0.09, 0.09), roles):
             r = d[d.role == role].sort_values("bound_dwell")
@@ -191,7 +236,7 @@ def plot(out, cal, check, s, molecules, title, size=SIZES[0], t_min=100.0):
     ax.errorbar(x - 0.09, sw.d_eff, yerr=1.96 * sw.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3, label=roles[0][3])
     ax.errorbar(x + 0.09, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8, capsize=3, label=roles[1][3])
     ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
-    ax.set_ylabel("measured D_eff (µm²/s, 95% CI)"); ax.set_ylim(0, 0.8)
+    ax.set_ylabel("measured D_eff (µm²/s, 95% CI)"); ax.set_ylim(0, max(0.8, 1.2 * (sw.d_eff + 2 * sw.d_eff_se).max()))
     ax.set_title("A. Long-range spreading (D_eff) is matched", loc="left", fontsize=10)
     ax.legend(fontsize=8, frameon=False, loc="lower left")
     style(ax)
@@ -237,16 +282,24 @@ def main():
     p.add_argument("--target-ring", type=int, default=None, help="override geometry.target_ring")
     p.add_argument("--receptors-per-cell", type=int, default=None, help="override receptors.n_per_cell")
     p.add_argument("--free-fraction", type=float, default=0.05, help="free fraction of the switching walker")
+    p.add_argument("--dwells", default="0.005,0.0707,0.285,1.0", help="bound dwells (s), comma-separated")
+    p.add_argument("--layouts", type=int, default=1, help="shared receptor layouts per point (n is split across them)")
+    p.add_argument("--phi", type=float, default=None, help="override the calibrated phi (free-only D_eff per unit D)")
     p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
     p.add_argument("--reuse-calibration", type=Path, default=None,
                    help="copy calibration CSVs from this run directory; valid because calibration runs have no "
                         "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
     args = p.parse_args()
 
-    global SIZES, FREE_FRACTION
+    global SIZES, FREE_FRACTION, DWELLS
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
     FREE_FRACTION = args.free_fraction
+    DWELLS = tuple(float(v) for v in args.dwells.split(","))
     cfg = base_config(args.config, args.target_ring, args.receptors_per_cell)
+    if args.dwells != "0.005,0.0707,0.285,1.0":
+        cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
+    if args.layouts > 1:
+        cfg = dataclasses.replace(cfg, name=cfg.name + f"_paired{args.layouts}")
     out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
     out.mkdir(parents=True, exist_ok=True)
     if args.reuse_calibration:
@@ -257,7 +310,7 @@ def main():
 
     print("1. D_eff calibration", flush=True)
     cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
-    phi = float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # free-only D_eff per unit D
+    phi = args.phi if args.phi is not None else float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # D_eff per unit D
     d_eff = cal[cal.role == "switch"].d_eff.to_numpy()
     d_ref = d_eff / phi
     (out / "reference.json").write_text(json.dumps(dict(phi=phi, d_eff=d_eff.tolist(), d_free_reference=d_ref.tolist()), indent=2))
@@ -268,16 +321,24 @@ def main():
 
     if not args.replot:
         print("3. capture runs", flush=True)
-        capture_runs(cfg, d_ref, out, args.n)
+        capture_runs(cfg, d_ref, out, args.n, args.layouts)
 
     s, molecules = summarize(out)
     s.to_csv(out / "summary.csv", index=False)
+    paired = None
+    if args.layouts > 1:
+        paired = paired_ratios(molecules[SIZES[0]])
+        paired.to_csv(out / "paired_ratios.csv", index=False)
     with pd.option_context("display.width", 220, "display.max_columns", 30, "display.float_format", "{:.4g}".format):
         print(s.to_string(index=False))
-    plot(out, cal, check, s, molecules,
-         f"Switching ({FREE_FRACTION * 100:g}% free) vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per run, "
+        if paired is not None:
+            print("\npaired switching / free-only (95% CI over layouts):")
+            print(paired.to_string(index=False))
+    plot(out, cal, check, s, molecules, paired=paired, title=
+         f"Switching ({FREE_FRACTION * 100:g}% free) vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per condition, "
          f"{SIZES[0] * 1e3:.0f} nm target, ring-{cfg.geometry.target_ring} targets with {cfg.receptors.n_per_cell} "
-         f"receptors each; free-only D_free = D_eff / φ, φ = {phi:.3f})")
+         f"receptors each; free-only D_free = D_eff / φ, φ = {phi:.3f}"
+         + (f"; {args.layouts} shared layouts)" if args.layouts > 1 else ")"))
     print(f"Saved {out / 'dimension_experiment.png'}")
 
 
