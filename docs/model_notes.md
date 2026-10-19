@@ -101,6 +101,19 @@ and is a draft/validation case only.
 | L45 | 10%-free switching sweep | Third sweep `dwell_10pct`: **free fraction 10%**, bound dwell **5, 30, 135, 500, 1000 ms** (free trips 0.56, 3.3, 15, 56, 111 ms; k_on ≤ 1800 s⁻¹, inside the validated range). The 135 ms point equals the f = 10% point of the L38 sweep (1/k_on = 15 ms). Sweep points are now numbered 0–13; adding a sweep changes the config hash, so this run uses its own directory `results/runs/lattice2d_dwell10/`. 2D, 500 molecules per point. |
 | L46 | 10%-free switching sweep results (2D) | 500 molecules per point (`results/figures/capture_curves_lattice2d_dwell_10pct.png`). Mean capture time **733 / 795 / 807 / 801 / 771 s (±26–29)** at bound dwell 5 / 30 / 135 / 500 / 1000 ms; medians 563–644 s. **Capture speed barely depends on switching rate** over a 200× range (5 ms is ~2 SE faster than the rest), while the share captured while bound falls **88 → 83 → 72 → 65 → 57%**. Same pattern as the 5%-free pilot (L40). Shared point (135 ms, 10% free) 807 ± 28 s vs 769 ± 25 s in the free-fraction sweep (L44), ~1 SE apart. 2 escapes in 2500. Time free within 0.4% of target. 26 min on 8 cores. |
 
+**Research question (2026-10-19):** is switching between dimensions meaningfully different
+from plain diffusion with the same average speed? Interpretation of L40/L44/L46: capture
+time tracks the free fraction but not the switching rate, likely because transport to ring 3
+dominates over the local search for a 10 nm receptor.
+
+| # | Topic | Decision |
+|---|-------|----------|
+| L47 | Reference walker | "Just diffusing in 2D" = a **free-only walker** (never binds) diffusing in the gaps with **D = the measured D_eff** of the switching point it is compared to; same geometry, receptors and capture rule. Primary comparison: T_switch / T_reference. |
+| L48 | Smaller target | Capture radius **2 nm** (was 10 nm), keeping **receptor count fixed** (3 per cell in 2D, 4000 in 3D), so coverage drops 25× (2D 0.0038%, 3D 0.004%). With the existing 10 nm results this gives a two-point capture-time vs target-size slope, an empirical effective dimension (1D ≈ independent of size, 2D ~ log(1/a), 3D ~ 1/a). |
+| L49 | Search decomposition | New per-molecule output: **time of first arrival at any target cell** (enters its binding layer or binds to it), splitting each search into transport and local search; plus the number of separate visits to target cells before capture. |
+| L50 | D_eff calibration | **Measure** D_eff at each switching point from receptor-free runs (long-time spreading per unit time), instead of the naive f·D_free + (1−f)·D_bound; kernel checks suggest it is about half the naive value in 2D. 3D HCP may be anisotropic (in-layer vs across layers), so report both. |
+| L51 | First dimension experiment (2D) | **5% free**; switching points at bound dwell **5, 71, 285, 1000 ms**; each paired with a free-only reference whose **D_free = D_eff / φ**, where φ = (measured D_eff of a free-only walker) / D, since a free walker's long-range spreading is slowed by the gap geometry; reference D_eff is re-measured to confirm the match. Capture runs at **2 nm and 10 nm** targets, **~100 molecules per run**, **6 threads** (2 cores left free). Calibration: 100 molecules × 3000 s, D_eff from time-averaged MSD at lag 500 s (also reported at 50 s). Script: `scripts/dimension_experiment.py`. |
+
 Derived geometry (from L1–L2):
 
 | Quantity | 2D (disks) | 3D (spheres) |

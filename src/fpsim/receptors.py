@@ -47,7 +47,7 @@ def make_receptors(cluster: Cluster, target_ring: int, n_per_cell: int, capture_
     if cluster.dim == 2:
         angles0 = 2 * math.pi * np.arange(n_per_cell) / n_per_cell
         base = np.column_stack([np.cos(angles0), np.sin(angles0)])
-        offsets = rng.uniform(0, 2 * math.pi / n_per_cell, size=len(cells))
+        offsets = rng.uniform(0, 2 * math.pi / max(n_per_cell, 1), size=len(cells))  # n_per_cell = 0: no receptors
         c, s_ = np.cos(offsets), np.sin(offsets)
         rotations = np.stack([np.stack([c, -s_], -1), np.stack([s_, c], -1)], axis=-2)
     else:

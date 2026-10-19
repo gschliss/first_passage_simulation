@@ -34,6 +34,7 @@ from fpsim.kernel.geom2d import (
     nearest_cell,
     point_on_membrane,
     receptor_arc_gap,
+    receptor_point_gap,
     reflect_out_of_cell,
 )
 
@@ -64,15 +65,19 @@ def run_molecules_2d(
     n_trips = np.zeros(n, dtype=np.int64)
     n_cell_changes = np.zeros(n, dtype=np.int64)
     n_steps = np.zeros(n, dtype=np.int64)
+    t_first_target = np.full(n, -1.0)  # first time in a target cell's layer or bound to it (L49)
+    n_target_visits = np.zeros(n, dtype=np.int64)  # binding episodes on target cells (L49)
 
     n_frames = int(t_max / traj_interval) + 2
     traj = np.full((max(n_traj, 1), n_frames, 4), np.nan)  # x, y, state, cell
 
     # Smallest steps: resolve the layer and keep k_layer·dt small (L30); resolve receptors.
-    dt_layer = min((dist_frac * layer) ** 2 / (2.0 * d_free), rate_frac / k_layer)
-    dt_bound = min(dt_cap, rate_frac / k_off)
+    # k_layer = k_off = 0 for free-only reference points (L47): no rate limit then.
+    dt_layer = min((dist_frac * layer) ** 2 / (2.0 * d_free), rate_frac / k_layer if k_layer > 0.0 else 1e300)
+    dt_bound = min(dt_cap, rate_frac / k_off if k_off > 0.0 else 1e300)
     half_width = capture_radius / radius  # receptor capture window, radians
     dt_receptor_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_bound)
+    dt_receptor_free_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_free)
 
     for i in prange(n):
         np.random.seed(seeds[i])
@@ -147,6 +152,11 @@ def run_molecules_2d(
                         feature = min(feature, d_escape)
                     dt = min(dt_cap, (dist_frac * feature) ** 2 / (2.0 * d_free))
                     dt = max(dt, dt_layer)
+                block = block_of_cell[near]
+                if mode != MODE_FIXED and block >= 0:  # slow down near receptors (L30, L48)
+                    rgap = receptor_point_gap(x, y, centers[near, 0], centers[near, 1], receptor_phis[block],
+                                              radius, capture_radius)
+                    dt = min(dt, max((dist_frac * rgap) ** 2 / (2.0 * d_free), dt_receptor_free_min))
                 if in_layer and exposure + k_layer * dt >= exposure_needed:
                     # Binds partway through this step, at the exact moment exposure reaches E.
                     dt = (exposure_needed - exposure) / k_layer
@@ -159,6 +169,11 @@ def run_molecules_2d(
                     x, y = point_on_membrane(cx, cy, theta, radius, 0.0)
                     state = BOUND
                     t_unbind = t + np.random.exponential(1.0 / k_off)
+                    if block_of_cell[cell] >= 0:
+                        if t_first_target[i] < 0.0:
+                            t_first_target[i] = t
+                        if block_of_cell[last_cell] < 0:
+                            n_target_visits[i] += 1
                     if cell != last_cell:
                         n_cell_changes[i] += 1
                     last_cell = cell
@@ -175,6 +190,8 @@ def run_molecules_2d(
                         x, y = reflect_out_of_cell(x, y, centers[near, 0], centers[near, 1], dist, radius)
                         dist = 2.0 * radius - dist
                     block = block_of_cell[near]
+                    if block >= 0 and t_first_target[i] < 0.0 and dist - radius <= layer:
+                        t_first_target[i] = t
                     if block >= 0 and dist - radius <= capture_radius:
                         j = free_capture(x, y, centers[near, 0], centers[near, 1], receptor_phis[block],
                                          radius, capture_radius)
@@ -210,4 +227,4 @@ def run_molecules_2d(
             traj[i, frame, 3] = final_cell[i]
 
     return (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_xy, end_xy,
-            time_free, n_trips, n_cell_changes, n_steps, traj[:n_traj])
+            time_free, n_trips, n_cell_changes, n_steps, traj[:n_traj], t_first_target, n_target_visits)

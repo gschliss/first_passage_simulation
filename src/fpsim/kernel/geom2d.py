@@ -127,3 +127,16 @@ def escape_test(x, y, near, near_dist, centers, neighbors, n_cells, spacing):
         if signed < best:
             best = signed
     return best < 0.0, best
+
+
+@njit(cache=True)
+def receptor_point_gap(x, y, cx, cy, phis, radius, capture_radius):
+    """Distance from (x, y) to the nearest receptor's capture zone (0 if inside one)."""
+    best = 1e300
+    for j in range(phis.shape[0]):
+        dx = x - (cx + radius * math.cos(phis[j]))
+        dy = y - (cy + radius * math.sin(phis[j]))
+        d = math.sqrt(dx * dx + dy * dy)
+        if d < best:
+            best = d
+    return max(best - capture_radius, 0.0)

@@ -47,14 +47,18 @@ def run_molecules_3d(
     n_trips = np.zeros(n, dtype=np.int64)
     n_cell_changes = np.zeros(n, dtype=np.int64)
     n_steps = np.zeros(n, dtype=np.int64)
+    t_first_target = np.full(n, -1.0)  # first time in a target cell's layer or bound to it (L49)
+    n_target_visits = np.zeros(n, dtype=np.int64)  # binding episodes on target cells (L49)
 
     n_frames = int(t_max / traj_interval) + 2
     traj = np.full((max(n_traj, 1), n_frames, 5), np.nan)  # x, y, z, state, cell
 
-    dt_layer = min((dist_frac * layer) ** 2 / (2.0 * d_free), rate_frac / k_layer)
-    dt_bound = min(dt_cap, rate_frac / k_off)
+    # k_layer = k_off = 0 for free-only reference points (L47): no rate limit then.
+    dt_layer = min((dist_frac * layer) ** 2 / (2.0 * d_free), rate_frac / k_layer if k_layer > 0.0 else 1e300)
+    dt_bound = min(dt_cap, rate_frac / k_off if k_off > 0.0 else 1e300)
     a_unit = capture_radius / radius  # capture radius in unit-sphere units
     dt_receptor_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_bound)
+    dt_receptor_free_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_free)
 
     for i in prange(n):
         np.random.seed(seeds[i])
@@ -131,6 +135,13 @@ def run_molecules_3d(
                         feature = min(feature, d_escape)
                     dt = min(dt_cap, (dist_frac * feature) ** 2 / (2.0 * d_free))
                     dt = max(dt, dt_layer)
+                block = block_of_cell[near]
+                if mode != MODE_FIXED and block >= 0 and height < grid_box * radius:  # near receptors (L30, L48)
+                    lx, ly, lz = to_local(rotations[block], (x - centers[near, 0]) / radius,
+                                          (y - centers[near, 1]) / radius, (z - centers[near, 2]) / radius)
+                    _, d = nearest_receptor(lx, ly, lz, base, grid_start, grid_index, grid_n, grid_box)
+                    rgap = max(d * radius - capture_radius, 0.0)  # d is a lower bound, so this is too
+                    dt = min(dt, max((dist_frac * rgap) ** 2 / (2.0 * d_free), dt_receptor_free_min))
                 if in_layer and exposure + k_layer * dt >= exposure_needed:
                     dt = (exposure_needed - exposure) / k_layer
                     time_free[i] += dt
@@ -142,6 +153,11 @@ def run_molecules_3d(
                     x, y, z = cx + radius * ux, cy + radius * uy, cz + radius * uz
                     state = BOUND
                     t_unbind = t + np.random.exponential(1.0 / k_off)
+                    if block_of_cell[cell] >= 0:
+                        if t_first_target[i] < 0.0:
+                            t_first_target[i] = t
+                        if block_of_cell[last_cell] < 0:
+                            n_target_visits[i] += 1
                     if cell != last_cell:
                         n_cell_changes[i] += 1
                     last_cell = cell
@@ -162,6 +178,8 @@ def run_molecules_3d(
                         z = centers[near, 2] + (z - centers[near, 2]) * scale
                         dist = 2.0 * radius - dist
                     block = block_of_cell[near]
+                    if block >= 0 and t_first_target[i] < 0.0 and dist - radius <= layer:
+                        t_first_target[i] = t
                     if block >= 0 and dist - radius <= capture_radius:
                         lx, ly, lz = to_local(rotations[block], (x - centers[near, 0]) / radius,
                                               (y - centers[near, 1]) / radius, (z - centers[near, 2]) / radius)
@@ -200,4 +218,4 @@ def run_molecules_3d(
             traj[i, frame, 4] = final_cell[i]
 
     return (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_xyz, end_xyz,
-            time_free, n_trips, n_cell_changes, n_steps, traj[:n_traj])
+            time_free, n_trips, n_cell_changes, n_steps, traj[:n_traj], t_first_target, n_target_visits)

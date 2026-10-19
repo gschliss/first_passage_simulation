@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -24,12 +25,15 @@ class Result:
     meta: dict = field(default_factory=dict)
 
 
-def strictest_dt(cfg: Config, k_layer: float, k_off: float) -> float:
+def strictest_dt(cfg: Config, k_layer: float, k_off: float, d_free: float | None = None) -> float:
     """Default fixed-mode step: the smallest adaptive limit at this sweep point (L34)."""
     s, d = cfg.stepping, cfg.diffusion
-    dt_layer = min((s.distance_fraction * cfg.membrane.binding_layer) ** 2 / (2 * d.d_free),
-                   s.max_rate_dt / k_layer)
-    return min(dt_layer, s.max_rate_dt / k_off, s.dt_cap)
+    rate = lambda k: s.max_rate_dt / k if k > 0 else math.inf  # noqa: E731
+    d_free = d_free if d_free is not None else d.d_free
+    dt_layer = min((s.distance_fraction * cfg.membrane.binding_layer) ** 2 / (2 * d_free), rate(k_layer))
+    a = cfg.receptors.capture_radius
+    dt_receptor = min((s.distance_fraction * a) ** 2 / (2 * d_free), (s.distance_fraction * a) ** 2 / (2 * d.d_bound))
+    return min(dt_layer, dt_receptor, rate(k_off), s.dt_cap)
 
 
 def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, t_max: float | None = None,
@@ -51,13 +55,14 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
     factor = layer_factor(g.dim, g.cell_radius, g.spacing, cfg.membrane.binding_layer)
     sp = cfg.sweep_point(sweep_index, factor)
     mode = MODE_FIXED if st.mode == "fixed" else MODE_ADAPTIVE
-    dt_fixed = st.dt_fixed if st.dt_fixed is not None else strictest_dt(cfg, sp.k_layer, sp.k_off)
+    d_free = sp.d_free if sp.d_free is not None else cfg.diffusion.d_free
+    dt_fixed = st.dt_fixed if st.dt_fixed is not None else strictest_dt(cfg, sp.k_layer, sp.k_off, d_free)
     seeds = molecule_seeds(seed, sweep_index, n, first_id)
     receptors = make_receptors(cluster, g.target_ring, cfg.receptors.n_per_cell, cfg.receptors.capture_radius,
                                np.random.default_rng([seed, sweep_index, layout_index]))
     lattice = (seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
                cluster.ring, cluster.rings, cluster.spacing)
-    physics = (g.cell_radius, cfg.membrane.binding_layer, cfg.diffusion.d_free, cfg.diffusion.d_bound,
+    physics = (g.cell_radius, cfg.membrane.binding_layer, d_free, cfg.diffusion.d_bound,
                sp.free_fraction, sp.k_off, sp.k_layer,
                mode, dt_fixed, st.distance_fraction, st.max_rate_dt, st.dt_cap,
                t_max, n_traj, run.trajectory_interval)
@@ -72,7 +77,7 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
                                receptors.base, grid.start, grid.index, grid.n, grid.box,
                                receptors.capture_radius, *physics)
     (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_pos, end_pos,
-     time_free, n_trips, n_cell_changes, n_steps, traj) = out
+     time_free, n_trips, n_cell_changes, n_steps, traj, t_first_target, n_target_visits) = out
     wall = time.time() - t0
 
     molecules = pd.DataFrame({
@@ -91,6 +96,8 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "n_trips": n_trips,  # unbinding events (excludes a free start)
         "n_cell_changes": n_cell_changes,
         "n_steps": n_steps,
+        "t_first_target": np.where(t_first_target >= 0, t_first_target, np.nan),  # NaN = never reached (L49)
+        "n_target_visits": n_target_visits,
     })
     meta = {
         "config": cfg.to_dict(),

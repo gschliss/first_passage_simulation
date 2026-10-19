@@ -70,34 +70,46 @@ class Run:
 
 
 RATE_KEYS = ("free_fraction", "bound_dwell", "free_dwell")
+SWEEP_KEYS = RATE_KEYS + ("d_free",)
 
 
 @dataclass(frozen=True)
 class Sweep:
     """One named sweep: exactly two of free_fraction, bound_dwell (1/k_off) and
-    free_dwell (1/k_on) are given, and at most one of them is a list (L23, L27, L38)."""
+    free_dwell (1/k_on) are given, and at most one of them is a list (L23, L27, L38).
+
+    ``free_fraction: 1.0`` alone defines **free-only** points that never bind (L47);
+    ``d_free`` (number or list) overrides diffusion.d_free for this sweep's points.
+    """
 
     name: str
     free_fraction: float | tuple | None = None
     bound_dwell: float | tuple | None = None  # s
     free_dwell: float | tuple | None = None  # s
+    d_free: float | tuple | None = None  # µm²/s, overrides diffusion.d_free
+
+    @property
+    def free_only(self) -> bool:
+        return self.free_fraction == 1.0 and self.bound_dwell is None and self.free_dwell is None
 
     def points(self) -> list[dict]:
-        given = {k: getattr(self, k) for k in RATE_KEYS if getattr(self, k) is not None}
+        given = {k: getattr(self, k) for k in SWEEP_KEYS if getattr(self, k) is not None}
         lists = [k for k, v in given.items() if isinstance(v, tuple)]
         n = len(given[lists[0]]) if lists else 1
         out = []
         for j in range(n):
             vals = {k: (v[j] if isinstance(v, tuple) else v) for k, v in given.items()}
             f, tb, tf = vals.get("free_fraction"), vals.get("bound_dwell"), vals.get("free_dwell")
+            if self.free_only:
+                tb, tf = 0.0, math.inf
             # f = tf / (tf + tb): the third quantity follows from the other two.
-            if f is None:
+            elif f is None:
                 f = tf / (tf + tb)
             elif tb is None:
                 tb = tf * (1 - f) / f
             elif tf is None:
                 tf = tb * f / (1 - f)
-            out.append(dict(free_fraction=f, bound_dwell=tb, free_dwell=tf))
+            out.append(dict(free_fraction=f, bound_dwell=tb, free_dwell=tf, d_free=vals.get("d_free")))
         return out
 
 
@@ -114,16 +126,24 @@ class SweepPoint:
 
     sweep: str
     free_fraction: float
-    bound_dwell: float  # s, 1/k_off
-    free_dwell: float  # s, 1/k_on
+    bound_dwell: float  # s, 1/k_off (0 for free-only points)
+    free_dwell: float  # s, 1/k_on (inf for free-only points)
     k_off: float
     k_on: float
     k_layer: float
+    d_free: float | None = None  # µm²/s override; None = diffusion.d_free
+
+    @property
+    def free_only(self) -> bool:
+        return self.k_on == 0.0
 
     @property
     def label(self) -> str:
+        d = "" if self.d_free is None else f", D_free {self.d_free:.3g} µm²/s"
+        if self.free_only:
+            return f"{self.sweep}: free only (never binds){d}"
         return (f"{self.sweep}: {self.free_fraction:.0%} free, bound {self.bound_dwell * 1e3:.4g} ms, "
-                f"free {self.free_dwell * 1e3:.3g} ms")
+                f"free {self.free_dwell * 1e3:.3g} ms{d}")
 
 
 @dataclass(frozen=True)
@@ -146,9 +166,11 @@ class Config:
         out = []
         for sw in self.sweeps:
             for p in sw.points():
-                k_on = 1.0 / p["free_dwell"]
-                out.append(SweepPoint(sweep=sw.name, k_off=1.0 / p["bound_dwell"], k_on=k_on,
-                                      k_layer=k_on * layer_factor, **p))
+                if sw.free_only:
+                    k_on = k_off = 0.0
+                else:
+                    k_on, k_off = 1.0 / p["free_dwell"], 1.0 / p["bound_dwell"]
+                out.append(SweepPoint(sweep=sw.name, k_off=k_off, k_on=k_on, k_layer=k_on * layer_factor, **p))
         return out
 
     def sweep_point(self, index: int, layer_factor: float) -> SweepPoint:
@@ -195,7 +217,7 @@ def from_dict(d: dict) -> Config:
         sweeps = []
         for name, spec in (d["sweeps"] or {}).items():
             spec = dict(spec or {})
-            bad = set(spec) - set(RATE_KEYS)
+            bad = set(spec) - set(SWEEP_KEYS)
             if bad:
                 raise ValueError(f"unknown keys in sweep '{name}': {sorted(bad)}")
             sweeps.append(Sweep(name, **{k: tuple(v) if isinstance(v, list) else v for k, v in spec.items()}))
@@ -214,7 +236,7 @@ def validate(cfg: Config) -> None:
         (g.dim in (2, 3), f"geometry.dim must be 2 or 3, got {g.dim}"),
         (g.cell_radius > 0 and g.gap > 0, "cell_radius and gap must be positive"),
         (g.target_ring >= 1 and g.rings_beyond_target >= 1, "target_ring and rings_beyond_target must be >= 1"),
-        (r.n_per_cell >= 1, "receptors.n_per_cell must be >= 1"),
+        (r.n_per_cell >= 0, "receptors.n_per_cell must be >= 0 (0 = no receptors, e.g. for D_eff calibration)"),
         (0 < r.capture_radius < g.gap / 2, "capture_radius must be in (0, gap/2)"),
         (cfg.diffusion.d_free > 0 and cfg.diffusion.d_bound > 0, "diffusion coefficients must be positive"),
         # Layers of facing cells must not overlap, or "nearest membrane" becomes ambiguous.
@@ -240,11 +262,19 @@ def sweep_errors(sweeps) -> list[str]:
         errors.append("sweep names must be unique")
     for sw in sweeps:
         given = {k: getattr(sw, k) for k in RATE_KEYS if getattr(sw, k) is not None}
-        if len(given) != 2:
-            errors.append(f"sweep '{sw.name}': give exactly two of {RATE_KEYS}, got {sorted(given)}")
-            continue
-        if sum(isinstance(v, tuple) for v in given.values()) > 1:
+        if sw.d_free is not None:
+            vals = sw.d_free if isinstance(sw.d_free, tuple) else (sw.d_free,)
+            if not vals or not all(isinstance(x, (int, float)) and x > 0 for x in vals):
+                errors.append(f"sweep '{sw.name}': d_free must be positive numbers")
+        n_lists = sum(isinstance(v, tuple) for v in list(given.values()) + [sw.d_free])
+        if n_lists > 1:
             errors.append(f"sweep '{sw.name}': at most one quantity may be a list")
+            continue
+        if sw.free_only:
+            continue
+        if len(given) != 2:
+            errors.append(f"sweep '{sw.name}': give exactly two of {RATE_KEYS} "
+                          f"(or free_fraction: 1.0 alone for free-only points), got {sorted(given)}")
             continue
         for k, v in given.items():
             vals = v if isinstance(v, tuple) else (v,)
