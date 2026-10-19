@@ -142,7 +142,7 @@ class SweepPoint:
         d = "" if self.d_free is None else f", D_free {self.d_free:.3g} µm²/s"
         if self.free_only:
             return f"{self.sweep}: free only (never binds){d}"
-        return (f"{self.sweep}: {self.free_fraction:.0%} free, bound {self.bound_dwell * 1e3:.4g} ms, "
+        return (f"{self.sweep}: {self.free_fraction * 100:g}% free, bound {self.bound_dwell * 1e3:.4g} ms, "
                 f"free {self.free_dwell * 1e3:.3g} ms{d}")
 
 
