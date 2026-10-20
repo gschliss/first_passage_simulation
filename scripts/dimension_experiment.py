@@ -282,6 +282,7 @@ def main():
     p.add_argument("--target-ring", type=int, default=None, help="override geometry.target_ring")
     p.add_argument("--receptors-per-cell", type=int, default=None, help="override receptors.n_per_cell")
     p.add_argument("--free-fraction", type=float, default=0.05, help="free fraction of the switching walker")
+    p.add_argument("--tag", default="", help="suffix for the run name / output folder (e.g. a code-version label)")
     p.add_argument("--dwells", default="0.005,0.0707,0.285,1.0", help="bound dwells (s), comma-separated")
     p.add_argument("--layouts", type=int, default=1, help="shared receptor layouts per point (n is split across them)")
     p.add_argument("--phi", type=float, default=None, help="override the calibrated phi (free-only D_eff per unit D)")
@@ -300,6 +301,8 @@ def main():
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
     if args.layouts > 1:
         cfg = dataclasses.replace(cfg, name=cfg.name + f"_paired{args.layouts}")
+    if args.tag:
+        cfg = dataclasses.replace(cfg, name=cfg.name + f"_{args.tag}")
     out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
     out.mkdir(parents=True, exist_ok=True)
     if args.reuse_calibration:

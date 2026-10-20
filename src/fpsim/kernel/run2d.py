@@ -48,7 +48,7 @@ def run_molecules_2d(
     d_free, d_bound,  # µm²/s
     free_fraction,  # initial split (L16)
     k_off, k_layer,  # s⁻¹
-    mode, dt_fixed, dist_frac, rate_frac, dt_cap,  # stepping (L30, L34)
+    mode, dt_fixed, dist_frac, rate_frac, dt_cap, rec_frac,  # stepping (L30, L34)
     t_max,
     n_traj, traj_interval,
 ):
@@ -77,7 +77,7 @@ def run_molecules_2d(
     dt_bound = min(dt_cap, rate_frac / k_off if k_off > 0.0 else 1e300)
     half_width = capture_radius / radius  # receptor capture window, radians
     dt_receptor_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_bound)
-    dt_receptor_free_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_free)
+    dt_receptor_free_min = (rec_frac * capture_radius) ** 2 / (2.0 * d_free)  # L71
 
     for i in prange(n):
         np.random.seed(seeds[i])
@@ -156,7 +156,7 @@ def run_molecules_2d(
                 if mode != MODE_FIXED and block >= 0:  # slow down near receptors (L30, L48)
                     rgap = receptor_point_gap(x, y, centers[near, 0], centers[near, 1], receptor_phis[block],
                                               radius, capture_radius)
-                    dt = min(dt, max((dist_frac * rgap) ** 2 / (2.0 * d_free), dt_receptor_free_min))
+                    dt = min(dt, max((rec_frac * rgap) ** 2 / (2.0 * d_free), dt_receptor_free_min))
                 if in_layer and exposure + k_layer * dt >= exposure_needed:
                     # Binds partway through this step, at the exact moment exposure reaches E.
                     dt = (exposure_needed - exposure) / k_layer

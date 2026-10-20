@@ -55,6 +55,7 @@ class Membrane:
 class Stepping:
     mode: str = "adaptive"  # "adaptive" or "fixed" (L34)
     distance_fraction: float = 0.125  # typical move ≤ this × distance to nearest feature (L30, L37)
+    receptor_fraction: float = 0.03125  # same, for free molecules near a receptor (L71; 0.125 misses ~15% of 2 nm captures)
     max_rate_dt: float = 0.05  # k·dt ≤ this for every active rate (L30)
     dt_cap: float = 1e-2  # s, upper bound on any step (L30)
     dt_fixed: float | None = None  # s; fixed mode only. None = strictest limit for the sweep point (L34)
@@ -242,7 +243,7 @@ def validate(cfg: Config) -> None:
         # Layers of facing cells must not overlap, or "nearest membrane" becomes ambiguous.
         (0 < m.binding_layer < g.gap / 2, "binding_layer must be in (0, gap/2)"),
         (s.mode in ("adaptive", "fixed"), f"stepping.mode must be 'adaptive' or 'fixed', got {s.mode!r}"),
-        (0 < s.distance_fraction <= 1 and 0 < s.max_rate_dt < 1, "accuracy settings out of range"),
+        (0 < s.distance_fraction <= 1 and 0 < s.receptor_fraction <= 1 and 0 < s.max_rate_dt < 1, "accuracy settings out of range"),
         (s.dt_fixed is None or s.dt_fixed > 0, "dt_fixed must be positive"),
         (run.n_molecules >= 1 and run.t_max > 0, "n_molecules and t_max must be positive"),
         (math.isfinite(run.trajectory_interval) and run.trajectory_interval > 0, "trajectory_interval must be positive"),

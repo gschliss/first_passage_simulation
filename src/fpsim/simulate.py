@@ -32,7 +32,7 @@ def strictest_dt(cfg: Config, k_layer: float, k_off: float, d_free: float | None
     d_free = d_free if d_free is not None else d.d_free
     dt_layer = min((s.distance_fraction * cfg.membrane.binding_layer) ** 2 / (2 * d_free), rate(k_layer))
     a = cfg.receptors.capture_radius
-    dt_receptor = min((s.distance_fraction * a) ** 2 / (2 * d_free), (s.distance_fraction * a) ** 2 / (2 * d.d_bound))
+    dt_receptor = min((s.receptor_fraction * a) ** 2 / (2 * d_free), (s.distance_fraction * a) ** 2 / (2 * d.d_bound))
     return min(dt_layer, dt_receptor, rate(k_off), s.dt_cap)
 
 
@@ -67,7 +67,7 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
                cluster.ring, cluster.rings, cluster.spacing)
     physics = (g.cell_radius, cfg.membrane.binding_layer, d_free, cfg.diffusion.d_bound,
                sp.free_fraction, sp.k_off, sp.k_layer,
-               mode, dt_fixed, st.distance_fraction, st.max_rate_dt, st.dt_cap,
+               mode, dt_fixed, st.distance_fraction, st.max_rate_dt, st.dt_cap, st.receptor_fraction,
                t_max, n_traj, run.trajectory_interval)
 
     t0 = time.time()

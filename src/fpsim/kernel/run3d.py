@@ -30,7 +30,7 @@ def run_molecules_3d(
     d_free, d_bound,
     free_fraction,
     k_off, k_layer,
-    mode, dt_fixed, dist_frac, rate_frac, dt_cap,
+    mode, dt_fixed, dist_frac, rate_frac, dt_cap, rec_frac,
     t_max,
     n_traj, traj_interval,
 ):
@@ -58,7 +58,7 @@ def run_molecules_3d(
     dt_bound = min(dt_cap, rate_frac / k_off if k_off > 0.0 else 1e300)
     a_unit = capture_radius / radius  # capture radius in unit-sphere units
     dt_receptor_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_bound)
-    dt_receptor_free_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_free)
+    dt_receptor_free_min = (rec_frac * capture_radius) ** 2 / (2.0 * d_free)  # L71
 
     for i in prange(n):
         np.random.seed(seeds[i])
@@ -141,7 +141,7 @@ def run_molecules_3d(
                                           (y - centers[near, 1]) / radius, (z - centers[near, 2]) / radius)
                     _, d = nearest_receptor(lx, ly, lz, base, grid_start, grid_index, grid_n, grid_box)
                     rgap = max(d * radius - capture_radius, 0.0)  # d is a lower bound, so this is too
-                    dt = min(dt, max((dist_frac * rgap) ** 2 / (2.0 * d_free), dt_receptor_free_min))
+                    dt = min(dt, max((rec_frac * rgap) ** 2 / (2.0 * d_free), dt_receptor_free_min))
                 if in_layer and exposure + k_layer * dt >= exposure_needed:
                     dt = (exposure_needed - exposure) / k_layer
                     time_free[i] += dt

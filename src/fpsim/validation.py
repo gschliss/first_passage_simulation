@@ -54,7 +54,7 @@ def narrow_escape_time(R, N, a, D):
 
 @njit(parallel=True, cache=True)
 def free_isolated(seeds, R, R_out, r0, d_free, layer, capture_radius, base, grid_start, grid_index, grid_n, grid_box,
-                  fixed, dt_fixed, dist_frac, dt_cap, rho=0.0):
+                  fixed, dt_fixed, dist_frac, dt_cap, rho=0.0, rec_frac=-1.0):
     """rho > 0: start uniformly within lateral distance rho (µm) of receptor 0, at radius r0;
     rho = 0: start uniformly over the sphere of radius r0."""
     n = seeds.shape[0]
@@ -63,7 +63,8 @@ def free_isolated(seeds, R, R_out, r0, d_free, layer, capture_radius, base, grid
     n_steps = np.zeros(n, dtype=np.int64)
     a_unit = capture_radius / R
     dt_layer = (dist_frac * layer) ** 2 / (2.0 * d_free)
-    dt_rec_min = (dist_frac * capture_radius) ** 2 / (2.0 * d_free)
+    rf = dist_frac if rec_frac <= 0.0 else rec_frac  # receptor rule fraction (L71); default = dist_frac
+    dt_rec_min = (rf * capture_radius) ** 2 / (2.0 * d_free)
     for i in prange(n):
         np.random.seed(seeds[i])
         if rho > 0.0:
@@ -104,7 +105,7 @@ def free_isolated(seeds, R, R_out, r0, d_free, layer, capture_radius, base, grid
                 if height < grid_box * R:
                     _, d = nearest_receptor(x / dist, y / dist, z / dist, base, grid_start, grid_index, grid_n, grid_box)
                     rgap = max(d * R - capture_radius, 0.0)
-                    dt = min(dt, max((dist_frac * rgap) ** 2 / (2.0 * d_free), dt_rec_min))
+                    dt = min(dt, max((rf * rgap) ** 2 / (2.0 * d_free), dt_rec_min))
             s = math.sqrt(2.0 * d_free * dt)
             x += s * np.random.standard_normal()
             y += s * np.random.standard_normal()
