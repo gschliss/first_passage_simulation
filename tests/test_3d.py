@@ -158,3 +158,20 @@ def test_3d_unbinding_rate_exact_and_free_fraction():
     assert m.n_trips.sum() == pytest.approx(expected, rel=4 / np.sqrt(expected))
     f = m.time_free / m.t_end
     assert abs(f.mean() - 0.05) < 0.003 + 4 * f.std(ddof=1) / np.sqrt(len(f))
+
+
+def test_dense_receptor_grid_finds_nearest_and_lower_bounds():
+    base = fibonacci_sphere(100000)
+    grid = make_grid(base)
+    assert grid.box < 0.02  # scaled to the ~112 nm spacing, not the 500 nm default (L72)
+    assert make_grid(fibonacci_sphere(1000)).box == 0.05  # sparse layouts keep the old grid
+    tree = cKDTree(base)
+    rng = np.random.default_rng(5)
+    q = rng.standard_normal((3000, 3))
+    q /= np.linalg.norm(q, axis=1, keepdims=True)
+    for v in q:
+        true_d, true_j = tree.query(v)
+        j, d = nearest_receptor(v[0], v[1], v[2], base, grid.start, grid.index, grid.n, grid.box)
+        assert d <= true_d + 1e-12
+        if true_d < grid.box:
+            assert j == true_j and d == pytest.approx(true_d)

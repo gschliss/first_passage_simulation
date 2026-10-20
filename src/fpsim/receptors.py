@@ -78,7 +78,12 @@ class ReceptorGrid:
     index: np.ndarray  # receptor indices sorted by box
 
 
-def make_grid(base: np.ndarray, box: float = 0.05) -> ReceptorGrid:
+def make_grid(base: np.ndarray, box: float | None = None) -> ReceptorGrid:
+    """``box`` (unit-sphere units) defaults to the receptor spacing, capped at 0.05 (500 nm on a
+    10 µm cell) and floored at 0.005, so dense layouts keep ~1 receptor per box (L72)."""
+    if box is None:
+        spacing = math.sqrt(4 * math.pi / max(len(base), 1))
+        box = min(0.05, max(0.005, spacing))
     n = int(math.ceil(2.0 / box))
     ijk = np.clip(((base + 1.0) / box).astype(np.int64), 0, n - 1)
     flat = (ijk[:, 0] * n + ijk[:, 1]) * n + ijk[:, 2]
