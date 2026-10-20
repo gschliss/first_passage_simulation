@@ -60,6 +60,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("run_dirs", type=Path, nargs="+")
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--t-min", type=float, default=100.0, help="start of the capture-curve time axis (s)")
     args = p.parse_args()
 
     paired, s, cal, check = load(args.run_dirs)
@@ -71,7 +72,7 @@ def main():
     outer = fig.add_gridspec(2, 1, height_ratios=[0.8, 2], hspace=0.28, top=0.95)
     top_gs = outer[0].subgridspec(1, n_c, wspace=0.12)
     t_max = max(max(a.t_end.max(), b.t_end.max()) for a, b in curves.values())
-    t = np.logspace(2, np.log10(t_max), 400)
+    t = np.logspace(np.log10(args.t_min), np.log10(t_max), 400)
     for k, (dwell, (msw, mref)) in enumerate(curves.items()):
         ax = fig.add_subplot(top_gs[0, k])
         for m, color, label in ((msw, BLUE, "switching (5% free)"), (mref, ORANGE, "free-only, same D_eff")):
