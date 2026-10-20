@@ -128,7 +128,26 @@ def main():
 
     by_role(axes[0, 1], "local_mean", "local_se", "mean time from first arrival to capture (s, 95% CI)",
             "B. Local search: finding the receptor at a target cell")
-    by_role(axes[1, 0], "t_mean", "t_se", "mean capture time (s, 95% CI)", "C. Total capture time")
+    # C. Where the time goes: stacked bars, transport (light) + local search (dark); bar height = total
+    ax = axes[1, 0]
+    from matplotlib.patches import Patch
+    xb = np.arange(len(dw))
+    for off, role, color in ((-0.19, "switch", BLUE), (0.19, "reference", ORANGE)):
+        r = s[s.role == role].sort_values("bound_dwell")
+        ax.bar(xb + off, r.transport_mean, 0.36, color=color, alpha=0.4, edgecolor="white", lw=2)
+        ax.bar(xb + off, r.local_mean, 0.36, bottom=r.transport_mean, color=color, edgecolor="white", lw=2)
+        ax.errorbar(xb + off, r.t_mean, yerr=1.96 * r.t_se, fmt="none", ecolor=INK, capsize=3, lw=1)
+    handles = [Patch(color=MUTED, alpha=0.4, label="light: reaching a target cell"),
+               Patch(color=MUTED, label="dark: then finding the receptor"),
+               Patch(color=BLUE, label="switching (5% free)"), Patch(color=ORANGE, label="free-only, same D_eff")]
+    ax.legend(handles=handles, frameon=False, fontsize=8.5, loc="upper left", ncol=2)
+    ax.set_xticks(xb, [f"{v:g}" for v in dw])
+    ax.set_xlabel("mean bound dwell of the switching walker (ms)")
+    ax.set_ylabel("mean time (s)")
+    top_y = (s.t_mean + 1.96 * s.t_se).max()
+    ax.set_ylim(0, top_y * 1.35)
+    ax.set_title("C. Where the time goes (left bar: switching, right: free-only)\nbar height = total capture time; error bar = its 95% CI", loc="left")
+    style(ax)
 
     ax = axes[1, 1]
     ax.errorbar(cal.bound_dwell * 1e3 * 0.97, cal.d_eff, yerr=1.96 * cal.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3,
