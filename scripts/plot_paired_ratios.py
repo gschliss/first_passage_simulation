@@ -164,8 +164,10 @@ def main():
     run_cfg = json.loads((args.run_dirs[0] / "runs_a2nm" / "config.json").read_text())["config"]
     f = next(sw["free_fraction"] for sw in run_cfg["sweeps"] if sw["name"] == "switch")
     n_mol = int(s[s.role == "switch"].n.iloc[0])
+    n_rec = run_cfg["receptors"]["n_per_cell"]
+    plural = "" if n_rec == 1 else "s"
     fig.suptitle(f"Switching vs non-switching diffusion at equal D_eff ({run_cfg['geometry']['dim']}D, {f * 100:g}% free, "
-                 f"ring-{run_cfg['geometry']['target_ring']} targets with {run_cfg["receptors"]["n_per_cell"]} receptor{"s" if run_cfg["receptors"]["n_per_cell"] != 1 else ""} per cell, "
+                 f"ring-{run_cfg['geometry']['target_ring']} targets with {n_rec} receptor{plural} per cell, "
                  f"{run_cfg['receptors']['capture_radius'] * 1e3:g} nm; {n_mol} molecules per condition)", fontsize=12, y=0.985)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=150, bbox_inches="tight")
