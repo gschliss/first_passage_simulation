@@ -20,6 +20,7 @@ import pandas as pd
 from fpsim.jobs import merge
 
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
+REF = "free-only, same D_eff"
 D_BOUND = 0.5  # µm²/s, for the slide-length axis (L20)
 
 
@@ -63,6 +64,12 @@ def main():
     p.add_argument("--t-min", type=float, default=100.0, help="start of the capture-curve time axis (s)")
     args = p.parse_args()
 
+    import json
+    ref_info = json.loads((args.run_dirs[0] / "reference.json").read_text())
+    global REF
+    REF = ref_info.get("label", "free-only, same D_eff")
+    matched = ref_info.get("matched", True)
+    eq = "at equal D_eff" if matched else f"({REF.split(', ')[1]}, not matched; times are for captured molecules)"
     paired, s, cal, check = load(args.run_dirs)
     curves = load_curves(args.run_dirs)
     dw = paired.bound_dwell.to_numpy() * 1e3  # ms
@@ -75,7 +82,7 @@ def main():
     t = np.logspace(np.log10(args.t_min), np.log10(t_max), 400)
     for k, (dwell, (msw, mref)) in enumerate(curves.items()):
         ax = fig.add_subplot(top_gs[0, k])
-        for m, color, label in ((msw, BLUE, "switching (5% free)"), (mref, ORANGE, "free-only, same D_eff")):
+        for m, color, label in ((msw, BLUE, "switching (5% free)"), (mref, ORANGE, REF)):
             times = np.sort(m.t_end[m.outcome == "captured"].to_numpy())
             f = np.searchsorted(times, t, side="right") / len(m)
             half = 1.96 * np.sqrt(f * (1 - f) / len(m))
@@ -99,12 +106,12 @@ def main():
         ax.errorbar(dw * off, paired[col], yerr=[paired[col] - paired[f"{col}_lo"], paired[f"{col}_hi"] - paired[col]],
                     fmt=mk + "-", color=color, ms=8, capsize=3, lw=1.5, label=label)
     ax.axhline(1, color=MUTED, lw=1)
-    ax.annotate("1 = switching no different from plain diffusion", (dw.max(), 1), xytext=(0, 5),
+    ax.annotate("1 = no difference", (dw.max(), 1), xytext=(0, 5),
                 textcoords="offset points", ha="right", fontsize=8.5, color=MUTED)
     ax.set_xscale("log")
     ax.set_xticks(dw, [f"{v:g}" for v in dw]); ax.minorticks_off()
     ax.set_xlabel("mean bound dwell of the switching walker (ms)")
-    ax.set_ylabel("switching / free-only at equal D_eff (mean time)")
+    ax.set_ylabel(("switching / free-only at equal D_eff" if matched else "switching / free-only") + " (mean time)")
     ax.set_title(f"A. Paired over {int(paired.n_layouts.iloc[0])} shared receptor layouts (95% CI)", loc="left")
     ax.legend(frameon=False, fontsize=9, loc="lower left")
     top = ax.secondary_xaxis("top", functions=(lambda ms: np.sqrt(2 * D_BOUND * np.maximum(ms, 1e-9) / 1e3),
@@ -117,7 +124,7 @@ def main():
 
     def by_role(ax, col, se, ylabel, title):
         for off, role, color, mk, label in ((0.97, "switch", BLUE, "o", "switching (5% free)"),
-                                            (1.03, "reference", ORANGE, "s", "free-only, same D_eff")):
+                                            (1.03, "reference", ORANGE, "s", REF)):
             r = s[s.role == role].sort_values("bound_dwell")
             ax.errorbar(r.bound_dwell * 1e3 * off, r[col], yerr=1.96 * r[se], fmt=mk + "-", color=color, ms=8,
                         capsize=3, lw=1.5, label=label)
@@ -140,7 +147,7 @@ def main():
         ax.errorbar(xb + off, r.t_mean, yerr=1.96 * r.t_se, fmt="none", ecolor=INK, capsize=3, lw=1)
     handles = [Patch(color=MUTED, alpha=0.4, label="light: reaching a target cell"),
                Patch(color=MUTED, label="dark: then finding the receptor"),
-               Patch(color=BLUE, label="switching (5% free)"), Patch(color=ORANGE, label="free-only, same D_eff")]
+               Patch(color=BLUE, label="switching (5% free)"), Patch(color=ORANGE, label=REF)]
     ax.legend(handles=handles, frameon=False, fontsize=8.5, loc="upper left", ncol=2)
     ax.set_xticks(xb, [f"{v:g}" for v in dw])
     ax.set_xlabel("mean bound dwell of the switching walker (ms)")
@@ -154,20 +161,24 @@ def main():
     ax.errorbar(cal.bound_dwell * 1e3 * 0.97, cal.d_eff, yerr=1.96 * cal.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3,
                 label="switching (5% free)")
     ax.errorbar(check.bound_dwell * 1e3 * 1.03, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8,
-                capsize=3, label="free-only, same D_eff")
+                capsize=3, label=REF)
     ax.set_xscale("log"); ax.set_xticks(dw, [f"{v:g}" for v in dw]); ax.minorticks_off()
     ax.set_xlabel("mean bound dwell of the switching walker (ms)")
-    ax.set_ylabel("measured D_eff (µm²/s, 95% CI)"); ax.set_ylim(0, 0.8)
-    ax.set_title("D. Long-range spreading is matched", loc="left"); ax.legend(frameon=False, fontsize=9, loc="lower left")
+    ax.set_ylabel("measured D_eff (µm²/s, 95% CI)")
+    if matched:
+        ax.set_ylim(0, 0.8)
+    else:
+        ax.set_yscale("log"); ax.set_ylim(0.3, 2 * check.d_eff.max())
+    ax.set_title("D. Long-range spreading is matched" if matched else "D. Long-range spreading (free-only: φ·D, predicted)",
+                 loc="left"); ax.legend(frameon=False, fontsize=9, loc="lower left")
     style(ax)
 
-    import json
     run_cfg = json.loads((args.run_dirs[0] / "runs_a2nm" / "config.json").read_text())["config"]
     f = next(sw["free_fraction"] for sw in run_cfg["sweeps"] if sw["name"] == "switch")
     n_mol = int(s[s.role == "switch"].n.iloc[0])
     n_rec = run_cfg["receptors"]["n_per_cell"]
     plural = "" if n_rec == 1 else "s"
-    fig.suptitle(f"Switching vs non-switching diffusion at equal D_eff ({run_cfg['geometry']['dim']}D, {f * 100:g}% free, "
+    fig.suptitle(f"Switching vs non-switching diffusion {eq}\n({run_cfg['geometry']['dim']}D, {f * 100:g}% free, "
                  f"ring-{run_cfg['geometry']['target_ring']} targets with {n_rec} receptor{plural} per cell, "
                  f"{run_cfg['receptors']['capture_radius'] * 1e3:g} nm; {n_mol} molecules per condition)", fontsize=12, y=0.985)
     args.out.parent.mkdir(parents=True, exist_ok=True)

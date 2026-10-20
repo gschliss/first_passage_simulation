@@ -10,6 +10,12 @@ Steps (each saved under results/dimension/<name>/; finished steps are reused on 
      with arrival-time outputs (L49).
   4. Figure + summary table.
 
+--d-ref D replaces step 2's matched reference with a free-only walker at a fixed D (L79);
+its D_eff is then phi * D (from the calibration), not measured again. --reuse-switching DIR
+copies the switching chunks from an earlier run with the same switching points, layouts and
+seeds (molecule seeds depend only on run seed, sweep index and molecule id), so only the
+reference walkers are simulated.
+
 Run with 6 threads to leave cores free:
     NUMBA_NUM_THREADS=6 python scripts/dimension_experiment.py --n 100
     python scripts/dimension_experiment.py --replot
@@ -30,12 +36,13 @@ import pandas as pd
 from fpsim import load_config
 from fpsim.config import Receptors, Sweep
 from fpsim.deff import measure_deff
-from fpsim.jobs import Task, merge, run_task
+from fpsim.jobs import Task, config_hash, merge, run_task, stem_for
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DWELLS = (0.005, 0.0707, 0.285, 1.0)  # s, bound dwell (same values as the 'dwell' sweep)
 FREE_FRACTION = 0.05
 SIZES = (0.002, 0.010)  # µm capture radius
+REF_LABEL = "free-only, same D_eff"
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
 
 
@@ -90,13 +97,37 @@ def verify_reference(cfg, d_ref, out, n, t_max, short_lag, long_lag):
     return df
 
 
-def capture_runs(cfg, d_ref, out, n, layouts=1):
+def copy_switching(ecfg, src_dir, run_dir, layouts):
+    """Copy switching chunks from an earlier run (same switching points and layouts) and restamp
+    them with this run's config hash; the reference points differ, the switching ones do not."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    chash = config_hash(ecfg)
+    for i in range(len(DWELLS)):
+        for c in range(layouts):
+            src, dst = stem_for(src_dir, Task(i, c)), stem_for(run_dir, Task(i, c))
+            if dst.with_suffix(".parquet").exists():
+                continue
+            meta = json.loads(src.with_suffix(".json").read_text())
+            assert meta["sweep_point"]["sweep"] == "switch" and abs(meta["sweep_point"]["bound_dwell"] - DWELLS[i]) < 1e-12, meta
+            meta.update(config_hash=chash, copied_from=str(src))
+            shutil.copy(src.with_suffix(".parquet"), dst.with_suffix(".parquet"))
+            dst.with_suffix(".json").write_text(json.dumps(meta, indent=2))
+
+
+def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None):
     """``layouts`` > 1: each point runs ``layouts`` chunks of n // layouts molecules, chunk c on
     shared receptor layout c, so switching and reference points see the same layouts (L57)."""
     dirs = {}
     for a in SIZES:
         ecfg = experiment_config(cfg, d_ref, a)
         run_dir = out / f"runs_a{a * 1e3:.0f}nm"
+        if reuse_switching is not None:
+            (run_dir).mkdir(parents=True, exist_ok=True)
+            manifest = dict(config=ecfg.to_dict(), config_hash=config_hash(ecfg), n_sweep_points=ecfg.n_sweep_points,
+                            sweep_labels=[p.label for p in ecfg.sweep_points(1.0)])
+            if not (run_dir / "config.json").exists():
+                (run_dir / "config.json").write_text(json.dumps(manifest, indent=2, default=float))
+            copy_switching(ecfg, reuse_switching / f"runs_a{a * 1e3:.0f}nm", run_dir, layouts)
         for i in range(ecfg.n_sweep_points):
             for c in range(layouts):
                 extra = {"layout_seed": c} if layouts > 1 else {}
@@ -176,7 +207,7 @@ def plot(out, cal, check, s, molecules, title, size=None, t_min=100.0, paired=No
     m = molecules[size]
     d = s[s.size_nm == round(size * 1e3)]
     roles = (("switch", BLUE, "o", f"switching ({FREE_FRACTION * 100:g}% free)"),
-             ("reference", ORANGE, "s", "free-only, same D_eff"))
+             ("reference", ORANGE, "s", REF_LABEL))
 
     # Top: cumulative capture per switching point, from t_min on
     t = np.logspace(np.log10(t_min), np.log10(m.t_end.max()), 400)
@@ -237,7 +268,10 @@ def plot(out, cal, check, s, molecules, title, size=None, t_min=100.0, paired=No
     ax.errorbar(x + 0.09, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8, capsize=3, label=roles[1][3])
     ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
     ax.set_ylabel("measured D_eff (µm²/s, 95% CI)"); ax.set_ylim(0, max(0.8, 1.2 * (sw.d_eff + 2 * sw.d_eff_se).max()))
-    ax.set_title("A. Long-range spreading (D_eff) is matched", loc="left", fontsize=10)
+    if REF_LABEL != "free-only, same D_eff":
+        ax.set_yscale("log"); ax.set_ylim(0.3, 2 * check.d_eff.max())
+    ax.set_title("A. Long-range spreading (D_eff)" + (" is matched" if REF_LABEL == "free-only, same D_eff"
+                 else "; free-only = φ·D"), loc="left", fontsize=10)
     ax.legend(fontsize=8, frameon=False, loc="lower left")
     style(ax)
 
@@ -287,12 +321,16 @@ def main():
     p.add_argument("--layouts", type=int, default=1, help="shared receptor layouts per point (n is split across them)")
     p.add_argument("--phi", type=float, default=None, help="override the calibrated phi (free-only D_eff per unit D)")
     p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
+    p.add_argument("--d-ref", type=float, default=None,
+                   help="free-only reference at this fixed D (µm²/s) instead of matched D_eff (L79)")
+    p.add_argument("--reuse-switching", type=Path, default=None,
+                   help="copy switching chunks from this earlier run directory (same points, layouts, seeds)")
     p.add_argument("--reuse-calibration", type=Path, default=None,
                    help="copy calibration CSVs from this run directory; valid because calibration runs have no "
                         "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
     args = p.parse_args()
 
-    global SIZES, FREE_FRACTION, DWELLS
+    global SIZES, FREE_FRACTION, DWELLS, REF_LABEL
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
     FREE_FRACTION = args.free_fraction
     DWELLS = tuple(float(v) for v in args.dwells.split(","))
@@ -301,12 +339,15 @@ def main():
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
     if args.layouts > 1:
         cfg = dataclasses.replace(cfg, name=cfg.name + f"_paired{args.layouts}")
+    if args.d_ref is not None:
+        cfg = dataclasses.replace(cfg, name=cfg.name + f"_ref{args.d_ref:g}")
+        REF_LABEL = f"free-only, D = {args.d_ref:g} µm²/s"
     if args.tag:
         cfg = dataclasses.replace(cfg, name=cfg.name + f"_{args.tag}")
     out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
     out.mkdir(parents=True, exist_ok=True)
     if args.reuse_calibration:
-        for name in ("calibration.csv", "calibration_reference.csv"):
+        for name in ("calibration.csv",) + (("calibration_reference.csv",) if args.d_ref is None else ()):
             if not (out / name).exists():
                 shutil.copy(args.reuse_calibration / name, out / name)
         print(f"   reusing calibration from {args.reuse_calibration}", flush=True)
@@ -315,16 +356,21 @@ def main():
     cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
     phi = args.phi if args.phi is not None else float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # D_eff per unit D
     d_eff = cal[cal.role == "switch"].d_eff.to_numpy()
-    d_ref = d_eff / phi
-    (out / "reference.json").write_text(json.dumps(dict(phi=phi, d_eff=d_eff.tolist(), d_free_reference=d_ref.tolist()), indent=2))
+    d_ref = d_eff / phi if args.d_ref is None else np.full(len(DWELLS), args.d_ref)
+    (out / "reference.json").write_text(json.dumps(dict(phi=phi, d_eff=d_eff.tolist(), d_free_reference=d_ref.tolist(),
+                                                        matched=args.d_ref is None, label=REF_LABEL), indent=2))
     print(f"   phi = {phi:.4f}; reference D_free = {np.round(d_ref, 4).tolist()}", flush=True)
 
     print("2. verify reference D_eff", flush=True)
-    check = verify_reference(cfg, d_ref, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
+    if args.d_ref is None:
+        check = verify_reference(cfg, d_ref, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
+    else:  # not matched, so not measured: D_eff of a free-only walker is phi * D
+        check = pd.DataFrame(dict(bound_dwell=DWELLS, d_eff=phi * d_ref, d_eff_se=0.0, label="predicted"))
+        check.to_csv(out / "calibration_reference.csv", index=False)
 
     if not args.replot:
         print("3. capture runs", flush=True)
-        capture_runs(cfg, d_ref, out, args.n, args.layouts)
+        capture_runs(cfg, d_ref, out, args.n, args.layouts, args.reuse_switching)
 
     s, molecules = summarize(out)
     s.to_csv(out / "summary.csv", index=False)
@@ -338,9 +384,11 @@ def main():
             print("\npaired switching / free-only (95% CI over layouts):")
             print(paired.to_string(index=False))
     plot(out, cal, check, s, molecules, paired=paired, title=
-         f"Switching ({FREE_FRACTION * 100:g}% free) vs non-switching diffusion at matched D_eff ({cfg.geometry.dim}D, {args.n} molecules per condition, "
+         f"Switching ({FREE_FRACTION * 100:g}% free) vs non-switching diffusion "
+         + ("at matched D_eff" if args.d_ref is None else f"at D_free = {args.d_ref:g} µm²/s (not matched)")
+         + f" ({cfg.geometry.dim}D, {args.n} molecules per condition, "
          f"{SIZES[0] * 1e3:.0f} nm target, ring-{cfg.geometry.target_ring} targets with {cfg.receptors.n_per_cell} "
-         f"receptors each; free-only D_free = D_eff / φ, φ = {phi:.3f}"
+         f"receptors each; " + (f"free-only D_free = D_eff / φ, φ = {phi:.3f}" if args.d_ref is None else f"φ = {phi:.3f}")
          + (f"; {args.layouts} shared layouts)" if args.layouts > 1 else ")"))
     print(f"Saved {out / 'dimension_experiment.png'}")
 
