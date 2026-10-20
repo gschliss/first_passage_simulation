@@ -180,7 +180,7 @@ def main():
     plural = "" if n_rec == 1 else "s"
     fig.suptitle(f"Switching vs non-switching diffusion {eq}\n({run_cfg['geometry']['dim']}D, {f * 100:g}% free, "
                  f"ring-{run_cfg['geometry']['target_ring']} targets with {n_rec} receptor{plural} per cell, "
-                 f"{run_cfg['receptors']['capture_radius'] * 1e3:g} nm; {n_mol} molecules per condition)", fontsize=12, y=0.985)
+                 f"{run_cfg['receptors']['capture_radius'] * 1e3:g} nm; {n_mol} molecules per condition)", fontsize=12, y=1.0)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=150, bbox_inches="tight")
     print(paired.to_string(index=False))
