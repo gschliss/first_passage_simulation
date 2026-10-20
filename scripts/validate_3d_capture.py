@@ -142,7 +142,7 @@ def plot(c1, c2, c3, c4, out):
 
     ax = axes[1, 0]
     x = np.arange(len(c3))
-    ax.errorbar(x, c3.T, yerr=1.96 * c3.T_se, fmt="o", color=BLUE, ms=9, capsize=4, label="simulation (95% CI)")
+    ax.errorbar(x, c3["T"], yerr=1.96 * c3["T_se"], fmt="o", color=BLUE, ms=9, capsize=4, label="simulation (95% CI)")
     for k, (a, theory) in enumerate(c3.groupby("a_nm").theory.first().items()):
         sel = np.flatnonzero(c3.a_nm == a)
         ax.hlines(theory, sel.min() - 0.3, sel.max() + 0.3, color=INK, lw=1.5, label="narrow-escape theory" if k == 0 else None)
