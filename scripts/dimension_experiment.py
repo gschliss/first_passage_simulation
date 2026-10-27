@@ -46,9 +46,12 @@ REF_LABEL = "free-only, same D_eff"
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
 
 
-def base_config(path, target_ring=None, n_per_cell=None):
+def base_config(path, target_ring=None, n_per_cell=None, d_free=None):
     cfg = load_config(path)
     suffix = "" if FREE_FRACTION == 0.05 else f"_f{FREE_FRACTION * 100:g}"
+    if d_free is not None:  # free-state D of the switching walker (L84)
+        cfg = dataclasses.replace(cfg, diffusion=dataclasses.replace(cfg.diffusion, d_free=d_free))
+        suffix += f"_Dfree{d_free:g}"
     if target_ring is not None:
         cfg = dataclasses.replace(cfg, geometry=dataclasses.replace(cfg.geometry, target_ring=target_ring))
         suffix += f"_ring{target_ring}"
@@ -201,8 +204,8 @@ def plot(out, cal, check, s, molecules, title, size=None, t_min=100.0, paired=No
     """Switching vs free-only reference at one target size (L52 replot: size comparison dropped)."""
     size = SIZES[0] if size is None else size
     plt.rcParams.update({"font.size": 9.5, "text.color": INK, "axes.labelcolor": INK})
-    fig = plt.figure(figsize=(18, 10))
-    gs = fig.add_gridspec(2, 4, height_ratios=[1, 1])
+    fig = plt.figure(figsize=(max(18, 4.5 * len(DWELLS)), 10))
+    gs = fig.add_gridspec(2, max(4, len(DWELLS)), height_ratios=[1, 1])
     sw = cal[cal.role == "switch"].reset_index(drop=True)
     m = molecules[size]
     d = s[s.size_nm == round(size * 1e3)]
@@ -321,6 +324,7 @@ def main():
     p.add_argument("--layouts", type=int, default=1, help="shared receptor layouts per point (n is split across them)")
     p.add_argument("--phi", type=float, default=None, help="override the calibrated phi (free-only D_eff per unit D)")
     p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
+    p.add_argument("--d-free", type=float, default=None, help="override diffusion.d_free (µm²/s) of the switching walker")
     p.add_argument("--d-ref", type=float, default=None,
                    help="free-only reference at this fixed D (µm²/s) instead of matched D_eff (L79)")
     p.add_argument("--reuse-switching", type=Path, default=None,
@@ -334,7 +338,7 @@ def main():
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
     FREE_FRACTION = args.free_fraction
     DWELLS = tuple(float(v) for v in args.dwells.split(","))
-    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell)
+    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free)
     if args.dwells != "0.005,0.0707,0.285,1.0":
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
     if args.layouts > 1:
@@ -357,6 +361,12 @@ def main():
     phi = args.phi if args.phi is not None else float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # D_eff per unit D
     d_eff = cal[cal.role == "switch"].d_eff.to_numpy()
     d_ref = d_eff / phi if args.d_ref is None else np.full(len(DWELLS), args.d_ref)
+    stored = out / f"runs_a{SIZES[0] * 1e3:.0f}nm" / "config.json"
+    if stored.exists():  # resume: reuse the exact stored values (the CSV round trip can change the last bit)
+        prev = next(s for s in json.loads(stored.read_text())["config"]["sweeps"] if s["name"] == "reference")["d_free"]
+        prev = np.atleast_1d(np.asarray(prev, dtype=float))
+        if prev.shape == d_ref.shape and np.allclose(prev, d_ref, rtol=1e-9, atol=0):
+            d_ref = prev
     (out / "reference.json").write_text(json.dumps(dict(phi=phi, d_eff=d_eff.tolist(), d_free_reference=d_ref.tolist(),
                                                         matched=args.d_ref is None, label=REF_LABEL), indent=2))
     print(f"   phi = {phi:.4f}; reference D_free = {np.round(d_ref, 4).tolist()}", flush=True)
