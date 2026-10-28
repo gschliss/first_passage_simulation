@@ -35,19 +35,21 @@ def style(ax):
 def load(dirs):
     s = pd.concat([pd.read_csv(d / "summary.csv") for d in dirs])
     p = pd.concat([pd.read_csv(d / "paired_ratios.csv") for d in dirs]).sort_values("bound_dwell")
-    extra = []
+    extra, curves = [], {}
     for d in dirs:
         m = merge(d / "runs_a2nm")[0]
+        dwells = sorted(m[m.sweep == "switch"].bound_dwell.unique())
+        for k, dwell in enumerate(dwells):  # capture times per walker; reference k pairs with switching point k
+            curves[dwell] = {"switch": m[m.sweep_index == k], "reference": m[m.sweep_index == len(dwells) + k]}
         if "t_first_find" not in m:
             continue
-        dwells = sorted(m[m.sweep == "switch"].bound_dwell.unique())
         c = m[m.outcome == "captured"]
         for i, g in c.groupby("sweep_index"):
             role = "switch" if i < len(dwells) else "reference"  # reference k pairs with switching point k
             x = g.t_end - g.t_first_find
             extra.append(dict(role=role, bound_dwell=dwells[i % len(dwells)], extra=x.mean(),
                               extra_se=x.std(ddof=1) / np.sqrt(len(x))))
-    return s, p, pd.DataFrame(extra)
+    return s, p, pd.DataFrame(extra), dict(sorted(curves.items()))
 
 
 def main():
@@ -61,12 +63,39 @@ def main():
     global ROLES
     ROLES = (ROLES[0], ("reference", ORANGE, "s", info.get("label", "free-only, same D_eff")))
     matched = info.get("matched", True)
-    s1, p1, _ = load(args.first)
-    s5, p5, extra = load(args.finds)
+    s1, p1, _, c1 = load(args.first)
+    s5, p5, extra, c5 = load(args.finds)
 
     plt.rcParams.update({"font.size": 10, "text.color": INK, "axes.labelcolor": INK})
-    fig, axes = plt.subplots(1, 4, figsize=(24, 5.6))
     dw = np.sort(s5.bound_dwell.unique())
+    fig = plt.figure(figsize=(max(24, 3.6 * len(dw)), 11.5))
+    outer = fig.add_gridspec(2, 1, height_ratios=[1, 1.1], hspace=0.32)
+    top = outer[0].subgridspec(1, len(dw), wspace=0.1)
+    t_hi = max(max(g.t_end.max() for g in c.values()) for c in list(c1.values()) + list(c5.values()))
+    t = np.logspace(1, np.log10(t_hi), 400)
+    for k, dwell in enumerate(dw):
+        ax = fig.add_subplot(top[0, k])
+        for role, color, _, label in ROLES:
+            for c, ls, tag in ((c1, "--", "first find"), (c5, "-", "5 finds")):
+                if dwell not in c:
+                    continue
+                g = c[dwell][role]
+                times = np.sort(g.t_end[g.outcome == "captured"].to_numpy())
+                f = np.searchsorted(times, t, side="right") / len(g)
+                half = 1.96 * np.sqrt(f * (1 - f) / len(g))
+                ax.fill_between(t, f - half, f + half, color=color, alpha=0.12, lw=0)
+                ax.plot(t, f, color=color, ls=ls, lw=2, label=f"{label}: {tag}")
+        ax.set_xscale("log"); ax.set_xlim(t[0], t[-1]); ax.set_ylim(0, 1.02)
+        ax.set_xlabel("time since release (s)")
+        if k == 0:
+            ax.set_ylabel("fraction captured")
+            ax.legend(fontsize=7.5, frameon=False, loc="upper left")
+        else:
+            ax.tick_params(labelleft=False)
+        ax.set_title(f"bound {dwell * 1e3:g} ms (bands: 95% CI)", loc="left", fontsize=10)
+        style(ax)
+    bottom = outer[1].subgridspec(1, 4, wspace=0.25)
+    axes = [fig.add_subplot(bottom[0, j]) for j in range(4)]
     ticks = (dw * 1e3, [f"{v * 1e3:g}" for v in dw])
 
     ax = axes[0]
@@ -115,8 +144,7 @@ def main():
     style(ax)
 
     fig.suptitle("First passage vs capture on the 5th receptor find (3D, ring-2 targets, 1000 receptors per cell, "
-                 "D_free 1, D_bound 0.5 µm²/s, 5% free, re-armed at 10 nm; 200 molecules per condition)", fontsize=11)
-    fig.tight_layout()
+                 "D_free 1, D_bound 0.5 µm²/s, 5% free, re-armed at 10 nm; 200 molecules per condition)", fontsize=11, y=0.94)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=150, bbox_inches="tight")
     print(f"Saved {args.out}")
