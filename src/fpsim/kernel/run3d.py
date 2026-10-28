@@ -4,7 +4,10 @@ Same rules as run2d (see its docstring) on the HCP sphere lattice:
   - free: 3D diffusion in the gaps, reflecting off spheres; binds only within the
     layer, at the nearest membrane point; escape when the nearest site is a ghost;
   - bound: 2D diffusion on the sphere surface (tangent step + renormalize);
-  - capture within ``capture_radius`` of a receptor center, from either state.
+  - capture within ``capture_radius`` of a receptor center, from either state, on the
+    ``n_finds``-th find (L86): after each earlier find the molecule carries on, and the
+    next find counts only once it has been more than ``rearm`` from the receptor it last
+    found (any receptor, including that one, can then be found again).
 Event timing is exact (L37). Receptors are looked up in each target cell's unrotated
 frame using one shared grid; near a receptor, bound steps shrink so each move is
 ≤ dist_frac × the remaining gap (down to dist_frac × capture radius).
@@ -21,6 +24,15 @@ from fpsim.kernel.common import BOUND, CAPTURED, ESCAPED, FREE, MODE_FIXED, TIME
 from fpsim.kernel.geom3d import escape_test3, nearest_cell3, nearest_receptor, sphere_step, to_local
 
 
+@njit(cache=True)
+def receptor_world(rot, base, j, cx, cy, cz, radius):
+    """World position of receptor j on a cell with rotation ``rot`` (inverse of to_local: R v)."""
+    bx, by, bz = base[j, 0], base[j, 1], base[j, 2]
+    return (cx + radius * (rot[0, 0] * bx + rot[0, 1] * by + rot[0, 2] * bz),
+            cy + radius * (rot[1, 0] * bx + rot[1, 1] * by + rot[1, 2] * bz),
+            cz + radius * (rot[2, 0] * bx + rot[2, 1] * by + rot[2, 2] * bz))
+
+
 @njit(parallel=True, cache=True)
 def run_molecules_3d(
     seeds,
@@ -33,6 +45,7 @@ def run_molecules_3d(
     mode, dt_fixed, dist_frac, rate_frac, dt_cap, rec_frac,
     t_max,
     n_traj, traj_interval,
+    n_finds, rearm,
 ):
     n = seeds.shape[0]
     outcome = np.full(n, TIMEOUT, dtype=np.int8)
@@ -49,6 +62,9 @@ def run_molecules_3d(
     n_steps = np.zeros(n, dtype=np.int64)
     t_first_target = np.full(n, -1.0)  # first time in a target cell's layer or bound to it (L49)
     n_target_visits = np.zeros(n, dtype=np.int64)  # binding episodes on target cells (L49)
+    t_first_find = np.full(n, -1.0)  # time of the first receptor find (L86)
+    finds = np.zeros(n, dtype=np.int64)
+    rearm2 = rearm * rearm
 
     n_frames = int(t_max / traj_interval) + 2
     traj = np.full((max(n_traj, 1), n_frames, 5), np.nan)  # x, y, z, state, cell
@@ -87,18 +103,28 @@ def run_molecules_3d(
         last_cell = cell
         frame = 0
         result = TIMEOUT
+        armed = True
+        rx, ry, rz = 0.0, 0.0, 0.0  # world position of the receptor found last
 
         while t < t_max:
             n_steps[i] += 1
+            if not armed and (x - rx) ** 2 + (y - ry) ** 2 + (z - rz) ** 2 > rearm2:
+                armed = True
             if state == BOUND:
                 block = block_of_cell[cell]
                 if block >= 0:
                     lx, ly, lz = to_local(rotations[block], ux, uy, uz)
                     j, d = nearest_receptor(lx, ly, lz, base, grid_start, grid_index, grid_n, grid_box)
-                    if d <= a_unit:
+                    if armed and d <= a_unit:
+                        finds[i] += 1
+                        if t_first_find[i] < 0.0:
+                            t_first_find[i] = t
                         receptor_id[i] = j
-                        result = CAPTURED
-                        break
+                        if finds[i] >= n_finds:
+                            result = CAPTURED
+                            break
+                        armed = False
+                        rx, ry, rz = receptor_world(rotations[block], base, j, cx, cy, cz, radius)
                 if mode == MODE_FIXED:
                     dt = dt_fixed
                 else:
@@ -184,10 +210,17 @@ def run_molecules_3d(
                         lx, ly, lz = to_local(rotations[block], (x - centers[near, 0]) / radius,
                                               (y - centers[near, 1]) / radius, (z - centers[near, 2]) / radius)
                         j, d = nearest_receptor(lx, ly, lz, base, grid_start, grid_index, grid_n, grid_box)
-                        if d <= a_unit:
+                        if armed and d <= a_unit:
+                            finds[i] += 1
+                            if t_first_find[i] < 0.0:
+                                t_first_find[i] = t
                             receptor_id[i] = j
-                            result = CAPTURED
-                            break
+                            if finds[i] >= n_finds:
+                                result = CAPTURED
+                                break
+                            armed = False
+                            rx, ry, rz = receptor_world(rotations[block], base, j, centers[near, 0], centers[near, 1],
+                                                        centers[near, 2], radius)
                     if ring[near] == outer_ring:
                         escaped, _ = escape_test3(x, y, z, near, dist, centers, neighbors, n_cells, spacing)
                         if escaped:
@@ -218,4 +251,5 @@ def run_molecules_3d(
             traj[i, frame, 4] = final_cell[i]
 
     return (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_xyz, end_xyz,
-            time_free, n_trips, n_cell_changes, n_steps, traj[:n_traj], t_first_target, n_target_visits)
+            time_free, n_trips, n_cell_changes, n_steps, traj[:n_traj], t_first_target, n_target_visits,
+            t_first_find, finds)

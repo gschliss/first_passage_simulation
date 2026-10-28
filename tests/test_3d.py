@@ -175,3 +175,28 @@ def test_dense_receptor_grid_finds_nearest_and_lower_bounds():
         assert d <= true_d + 1e-12
         if true_d < grid.box:
             assert j == true_j and d == pytest.approx(true_d)
+
+
+def test_3d_multi_find_capture(small_run):
+    """L86: with finds_to_capture = 5, the first find is the 1-find capture, every capture
+    has exactly 5 finds, and the defaults leave the config hash and results unchanged."""
+    import dataclasses
+
+    from fpsim.jobs import config_hash
+    assert "finds_to_capture" not in SMALL3.to_dict()["receptors"]
+    five = dataclasses.replace(SMALL3, receptors=dataclasses.replace(SMALL3.receptors, finds_to_capture=5,
+                                                                    rearm_distance=0.05))
+    assert config_hash(five) != config_hash(SMALL3)
+    m1 = small_run.molecules
+    m5 = simulate(five, 1, n_molecules=300, t_max=30.0).molecules
+    assert (m1.n_finds[m1.outcome == "captured"] == 1).all()
+    cap = m5[m5.outcome == "captured"]
+    assert len(cap) > 5 and (cap.n_finds == 5).all()
+    assert (cap.t_first_find <= cap.t_end).all()
+    first = m1.outcome == "captured"
+    both = first & (m5.n_finds >= 1)
+    np.testing.assert_allclose(m5.t_first_find[both], m1.t_end[both])
+    assert (m5.n_finds[~first & (m1.outcome != "timeout")] == 0).all()
+    with pytest.raises(ValueError):
+        dataclasses.replace(SMALL3, receptors=dataclasses.replace(SMALL3.receptors, finds_to_capture=5,
+                                                                  rearm_distance=0.005))

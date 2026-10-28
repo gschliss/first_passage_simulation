@@ -78,7 +78,10 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         grid = make_grid(receptors.base)
         out = run_molecules_3d(*lattice, np.ascontiguousarray(receptors.rotations), receptors.block_of_cell,
                                receptors.base, grid.start, grid.index, grid.n, grid.box,
-                               receptors.capture_radius, *physics)
+                               receptors.capture_radius, *physics,
+                               cfg.receptors.finds_to_capture, cfg.receptors.rearm_distance)
+        t_first_find, n_finds = out[15:]
+        out = out[:15]
     (outcome, t_end, start_state, final_state, final_cell, receptor_id, start_pos, end_pos,
      time_free, n_trips, n_cell_changes, n_steps, traj, t_first_target, n_target_visits) = out
     wall = time.time() - t0
@@ -101,6 +104,8 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
         "n_steps": n_steps,
         "t_first_target": np.where(t_first_target >= 0, t_first_target, np.nan),  # NaN = never reached (L49)
         "n_target_visits": n_target_visits,
+        **({"t_first_find": np.where(t_first_find >= 0, t_first_find, np.nan),  # L86
+            "n_finds": n_finds} if g.dim == 3 else {}),
     })
     meta = {
         "config": cfg.to_dict(),

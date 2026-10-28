@@ -46,9 +46,13 @@ REF_LABEL = "free-only, same D_eff"
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
 
 
-def base_config(path, target_ring=None, n_per_cell=None, d_free=None):
+def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, rearm=0.010):
     cfg = load_config(path)
     suffix = "" if FREE_FRACTION == 0.05 else f"_f{FREE_FRACTION * 100:g}"
+    if finds != 1:  # captured on the finds-th receptor find (L86)
+        cfg = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, finds_to_capture=finds,
+                                                                     rearm_distance=rearm))
+        suffix += f"_finds{finds}" + ("" if rearm == 0.010 else f"_rearm{rearm * 1e3:g}nm")
     if d_free is not None:  # free-state D of the switching walker (L84)
         cfg = dataclasses.replace(cfg, diffusion=dataclasses.replace(cfg.diffusion, d_free=d_free))
         suffix += f"_Dfree{d_free:g}"
@@ -80,7 +84,7 @@ def calibrate(cfg, out, n, t_max, short_lag, long_lag):
 def experiment_config(cfg, d_ref, capture_radius):
     return dataclasses.replace(
         cfg, name=f"{cfg.name}_dim_a{capture_radius * 1e3:.0f}nm",
-        receptors=Receptors(n_per_cell=cfg.receptors.n_per_cell, capture_radius=capture_radius),
+        receptors=dataclasses.replace(cfg.receptors, capture_radius=capture_radius),
         sweeps=(Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS),
                 Sweep("reference", free_fraction=1.0, d_free=tuple(float(d) for d in d_ref))))
 
@@ -181,7 +185,9 @@ def summarize(out):
                              transport_mean=arr.mean(), local_mean=(t - arr).mean(),
                              local_se=(t - arr).std(ddof=1) / np.sqrt(len(t)),
                              from_bound=(cap.final_state == "bound").mean(),
-                             visits_mean=cap.n_target_visits.mean()))
+                             visits_mean=cap.n_target_visits.mean(),
+                             **({"first_find_mean": cap.t_first_find.mean(),
+                                 "finds_mean": m.n_finds.mean()} if "t_first_find" in cap else {})))
     return pd.DataFrame(rows), {a: merge(out / f"runs_a{a * 1e3:.0f}nm")[0] for a in SIZES}
 
 
@@ -324,6 +330,8 @@ def main():
     p.add_argument("--layouts", type=int, default=1, help="shared receptor layouts per point (n is split across them)")
     p.add_argument("--phi", type=float, default=None, help="override the calibrated phi (free-only D_eff per unit D)")
     p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
+    p.add_argument("--finds", type=int, default=1, help="receptor finds needed for capture (L86; 3D only)")
+    p.add_argument("--rearm", type=float, default=0.010, help="µm from the last receptor found before a new find counts")
     p.add_argument("--d-free", type=float, default=None, help="override diffusion.d_free (µm²/s) of the switching walker")
     p.add_argument("--d-ref", type=float, default=None,
                    help="free-only reference at this fixed D (µm²/s) instead of matched D_eff (L79)")
@@ -338,7 +346,7 @@ def main():
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
     FREE_FRACTION = args.free_fraction
     DWELLS = tuple(float(v) for v in args.dwells.split(","))
-    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free)
+    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free, args.finds, args.rearm)
     if args.dwells != "0.005,0.0707,0.285,1.0":
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
     if args.layouts > 1:

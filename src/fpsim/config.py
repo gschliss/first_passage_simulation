@@ -38,6 +38,8 @@ class Geometry:
 class Receptors:
     n_per_cell: int = 3  # 3 in 2D, 4000 in 3D: ~0.1% coverage (L18)
     capture_radius: float = 0.010  # µm, from the receptor center (L19)
+    finds_to_capture: int = 1  # captured on this many receptor finds; 1 = first passage (L86)
+    rearm_distance: float = 0.010  # µm from the last receptor found before a new find counts (L86)
 
 
 @dataclass(frozen=True)
@@ -189,7 +191,12 @@ class Config:
         raise KeyError(f"no point {values} in sweep {sweep!r}")
 
     def to_dict(self) -> dict:
-        return dataclasses.asdict(self)
+        d = dataclasses.asdict(self)
+        # Multi-find settings (L86) are left out at their defaults, so earlier runs keep their config hashes.
+        for k, f in (("finds_to_capture", 1), ("rearm_distance", 0.010)):
+            if d["receptors"][k] == f:
+                del d["receptors"][k]
+        return d
 
 
 SECTIONS = {
@@ -239,6 +246,10 @@ def validate(cfg: Config) -> None:
         (g.target_ring >= 1 and g.rings_beyond_target >= 1, "target_ring and rings_beyond_target must be >= 1"),
         (r.n_per_cell >= 0, "receptors.n_per_cell must be >= 0 (0 = no receptors, e.g. for D_eff calibration)"),
         (0 < r.capture_radius < g.gap / 2, "capture_radius must be in (0, gap/2)"),
+        (r.finds_to_capture >= 1, "receptors.finds_to_capture must be >= 1"),
+        (r.finds_to_capture == 1 or r.rearm_distance > r.capture_radius,
+         "receptors.rearm_distance must exceed capture_radius"),
+        (r.finds_to_capture == 1 or g.dim == 3, "finds_to_capture > 1 is implemented for 3D only"),
         (cfg.diffusion.d_free > 0 and cfg.diffusion.d_bound > 0, "diffusion coefficients must be positive"),
         # Layers of facing cells must not overlap, or "nearest membrane" becomes ambiguous.
         (0 < m.binding_layer < g.gap / 2, "binding_layer must be in (0, gap/2)"),
