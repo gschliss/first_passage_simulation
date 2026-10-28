@@ -7,6 +7,7 @@ captured by receptors on a ring of target cells. A 2D version (disks; free 2D
 diffusion ↔ 1D membrane diffusion) and a 3D version (HCP spheres; free 3D ↔
 2D membrane) are compared.
 
+- **Current state, how to run it, resuming on a new machine:** [docs/handoff.md](docs/handoff.md)
 - **Model and every decision:** [docs/model_notes.md](docs/model_notes.md)
 - **Code plan and build order:** [docs/architecture.md](docs/architecture.md)
 
