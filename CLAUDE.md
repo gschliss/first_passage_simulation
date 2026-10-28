@@ -17,14 +17,14 @@ in `docs/model_notes.md` (L1 onward). Add every new decision or result there as 
 - Validate new physics against an analytical case where one exists (`src/fpsim/validation.py`,
   `scripts/check_bp_dense.py`, `scripts/validate_3d_capture.py`). Check that a change with default settings
   reproduces a stored chunk bit-for-bit.
-- Run tests with `NUMBA_NUM_THREADS=6 .venv/bin/python -m pytest -q` from the project root.
+- Run tests with `NUMBA_NUM_THREADS=8 .venv/bin/python -m pytest -q` from the project root.
 
 ## Working with the user
 
 - Decide modeling choices together: propose options and trade-offs and wait for agreement before coding
   physics or design changes. Make every assumption visible.
 - Conceptual "why / where would X matter" questions: answer and stop; don't start simulations unless asked.
-- Keep runs small (about 200 molecules per condition) and use 6 threads (`NUMBA_NUM_THREADS=6`), leaving 2 cores free.
+- Keep runs small (about 200 molecules per condition) and use 8 threads (`NUMBA_NUM_THREADS=8`), leaving 2 cores free.
 - Visuals first. Figures always include the cumulative capture curves, and use the stacked "where the
   time goes" bars. Show figures as soon as they're ready.
 - Report escape fractions alongside mean times (means count captured molecules only), and say plainly

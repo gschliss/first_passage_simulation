@@ -5,7 +5,7 @@ at 2 µm; compares the simulated capture probability with Berg–Purcell, using 
 current default step rules (including the L71 near-receptor rule).
 
 Usage:
-    NUMBA_NUM_THREADS=6 python scripts/check_bp_dense.py --receptors 100000 --n 20000
+    NUMBA_NUM_THREADS=8 python scripts/check_bp_dense.py --receptors 100000 --n 20000
 """
 
 from __future__ import annotations

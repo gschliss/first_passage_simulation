@@ -143,7 +143,10 @@ def main():
     ax.set_title("D. Fraction that reach capture", loc="left"); ax.legend(frameon=False, fontsize=8, loc="center left")
     style(ax)
 
-    fig.suptitle("First passage vs capture on the 5th receptor find (3D, ring-2 targets, 1000 receptors per cell, "
+    cfg = json.loads(next(args.finds[0].glob("runs_*/config.json")).read_text())["config"]
+    ring = cfg["geometry"]["target_ring"]
+    rec = cfg["receptors"]["n_per_cell"]
+    fig.suptitle(f"First passage vs capture on the 5th receptor find (3D, ring-{ring} targets, {rec} receptors per cell, "
                  "D_free 1, D_bound 0.5 µm²/s, 5% free, re-armed at 10 nm; 200 molecules per condition)", fontsize=11, y=0.94)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=150, bbox_inches="tight")

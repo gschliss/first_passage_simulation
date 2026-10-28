@@ -10,7 +10,7 @@ git clone https://github.com/gschliss/first_passage_simulation.git
 cd first_passage_simulation
 python3.11 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-NUMBA_NUM_THREADS=6 .venv/bin/python -m pytest -q    # 73 tests; the first run compiles Numba kernels
+NUMBA_NUM_THREADS=8 .venv/bin/python -m pytest -q    # 73 tests; the first run compiles Numba kernels
 ```
 
 - The repository is **private**, so the new machine needs GitHub access, for example `gh auth login`.
@@ -55,7 +55,7 @@ cells?
 | Capture rule | first find, or **5th find** with re-arm at 10 nm (3D only, L86) | `--finds 5 --rearm 0.010` |
 | φ (free-only packing factor) | 0.691 (3D), 0.387 (2D) | `--phi` |
 | Near-receptor step rule | receptor_fraction 1/32 ("rf32", L71) | `--tag rf32` in run names |
-| Threads | **6** (leave 2 cores free) | `NUMBA_NUM_THREADS=6` |
+| Threads | **8** (leave 2 cores free) | `NUMBA_NUM_THREADS=8` |
 
 ## 4. How to run things
 
@@ -63,7 +63,7 @@ One command runs a full paired experiment: calibration, matched reference, captu
 paired ratios and a per-run figure.
 
 ```bash
-NUMBA_NUM_THREADS=6 .venv/bin/python scripts/dimension_experiment.py \
+NUMBA_NUM_THREADS=8 .venv/bin/python scripts/dimension_experiment.py \
   --config configs/lattice3d.yaml --n 200 --layouts 10 --sizes 2 --target-ring 2 \
   --receptors-per-cell 1000 --tag rf32 --phi 0.691 --d-free 1 --dwells 0.05,0.1,0.3,1,4,10,30
 ```
@@ -73,7 +73,7 @@ so only the free-only walker is simulated:
 
 ```bash
 M=results/dimension/<the matched run's folder>
-NUMBA_NUM_THREADS=6 .venv/bin/python scripts/dimension_experiment.py <same flags> \
+NUMBA_NUM_THREADS=8 .venv/bin/python scripts/dimension_experiment.py <same flags> \
   --d-ref 1 --reuse-calibration $M --reuse-switching $M
 ```
 
@@ -150,7 +150,7 @@ ring 2. In 2D, switching gives no advantage at D = 1.
   assumption visible so it can be audited.
 - **Conceptual questions get conceptual answers.** When asked "why" or "where would X matter", answer
   and stop; don't launch or set up simulations unless asked.
-- **Keep runs small:** about 200 molecules per condition, 6 threads.
+- **Keep runs small:** about 200 molecules per condition, 8 threads.
 - **Figures:**
   - Always include the cumulative capture curves.
   - Use the stacked "where the time goes" bars: light for reaching a target cell, dark for finding the

@@ -13,7 +13,7 @@
      finer steps on the same 10 layouts and molecule seeds; local search must not change.
 
 Usage:
-    NUMBA_NUM_THREADS=6 python scripts/validate_3d_capture.py
+    NUMBA_NUM_THREADS=8 python scripts/validate_3d_capture.py
     python scripts/validate_3d_capture.py --replot
 """
 

@@ -16,8 +16,8 @@ copies the switching chunks from an earlier run with the same switching points, 
 seeds (molecule seeds depend only on run seed, sweep index and molecule id), so only the
 reference walkers are simulated.
 
-Run with 6 threads to leave cores free:
-    NUMBA_NUM_THREADS=6 python scripts/dimension_experiment.py --n 100
+Run with 8 threads to leave cores free:
+    NUMBA_NUM_THREADS=8 python scripts/dimension_experiment.py --n 100
     python scripts/dimension_experiment.py --replot
 """
 
