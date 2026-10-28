@@ -13,8 +13,8 @@ receptors:
   capture_radius: 0.010    # µm from receptor center [L19]
 
 diffusion:
-  d_free: 10.0             # µm²/s [L20]
-  d_bound: 0.5             # µm²/s [L20]
+  d_free: 0.5              # µm²/s [L91]
+  d_bound: 0.5             # µm²/s [L20, L91]
 
 membrane:
   binding_layer: 0.010     # µm [L28]

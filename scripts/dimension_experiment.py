@@ -170,6 +170,18 @@ def paired_ratios(m, n_boot=4000, seed=0):
     return pd.DataFrame(rows)
 
 
+def quantile_time(times, n_total, q=0.20):
+    """Time by which a fraction q of ALL n_total molecules have been captured (L91's t_20).
+
+    Molecules that escape or time out never arrive, so they are counted as +inf rather than
+    dropped: unlike the mean, this does not condition on capture, and it is defined whenever
+    more than q of the cohort is captured (NaN otherwise).
+    """
+    t = np.sort(np.asarray(times, dtype=float))
+    k = int(np.ceil(q * n_total))
+    return float(t[k - 1]) if 0 < k <= len(t) else np.nan
+
+
 def summarize(out):
     rows = []
     for a in SIZES:
@@ -184,11 +196,13 @@ def summarize(out):
                              captured=len(cap) / len(m), escaped=(m.outcome == "escaped").mean(),
                              timeout=(m.outcome == "timeout").mean(),
                              t_mean=t.mean(), t_se=t.std(ddof=1) / np.sqrt(len(t)), t_median=t.median(),
+                             t20=quantile_time(t, len(m)),
                              transport_mean=arr.mean(), local_mean=(t - arr).mean(),
                              local_se=(t - arr).std(ddof=1) / np.sqrt(len(t)),
                              from_bound=(cap.final_state == "bound").mean(),
                              visits_mean=cap.n_target_visits.mean(),
                              **({"first_find_mean": cap.t_first_find.mean(),
+                                 "t20_first_find": quantile_time(m.t_first_find.dropna(), len(m)),
                                  "finds_mean": m.n_finds.mean()} if "t_first_find" in cap else {})))
     return pd.DataFrame(rows), {a: merge(out / f"runs_a{a * 1e3:.0f}nm")[0] for a in SIZES}
 
@@ -275,15 +289,23 @@ def plot(out, cal, check, s, molecules, title, size=None, t_min=100.0, paired=No
 
     # Bottom 1: D_eff matching
     ax = fig.add_subplot(gs[1, 0])
-    ax.errorbar(x - 0.09, sw.d_eff, yerr=1.96 * sw.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3, label=roles[0][3])
-    ax.errorbar(x + 0.09, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8, capsize=3, label=roles[1][3])
-    ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
-    ax.set_ylabel("measured D_eff (µm²/s, 95% CI)"); ax.set_ylim(0, max(0.8, 1.2 * (sw.d_eff + 2 * sw.d_eff_se).max()))
-    if REF_LABEL != "free-only, same D_eff":
-        ax.set_yscale("log"); ax.set_ylim(0.3, 2 * check.d_eff.max())
-    ax.set_title("A. Long-range spreading (D_eff)" + (" is matched" if REF_LABEL == "free-only, same D_eff"
-                 else "; free-only = φ·D"), loc="left", fontsize=10)
-    ax.legend(fontsize=8, frameon=False, loc="lower left")
+    if not np.isfinite(sw.d_eff).any():  # --skip-calibration: nothing was measured (L91)
+        ax.text(0.5, 0.5, f"D_eff not measured\n(--skip-calibration)\n{REF_LABEL}",
+                ha="center", va="center", transform=ax.transAxes, color=MUTED, fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title("A. Long-range spreading (D_eff)", loc="left", fontsize=10)
+    else:
+        ax.errorbar(x - 0.09, sw.d_eff, yerr=1.96 * sw.d_eff_se, fmt="o", color=BLUE, ms=8, capsize=3, label=roles[0][3])
+        ax.errorbar(x + 0.09, check.d_eff, yerr=1.96 * check.d_eff_se, fmt="s", color=ORANGE, ms=8, capsize=3,
+                    label=roles[1][3])
+        ax.set_xticks(x, xt); ax.set_xlabel("bound dwell of the switching walker (ms)")
+        ax.set_ylabel("measured D_eff (µm²/s, 95% CI)")
+        ax.set_ylim(0, max(0.8, 1.2 * (sw.d_eff + 2 * sw.d_eff_se).max()))
+        if REF_LABEL != "free-only, same D_eff":
+            ax.set_yscale("log"); ax.set_ylim(0.3, 2 * check.d_eff.max())
+        ax.set_title("A. Long-range spreading (D_eff)" + (" is matched" if REF_LABEL == "free-only, same D_eff"
+                     else "; free-only = φ·D"), loc="left", fontsize=10)
+        ax.legend(fontsize=8, frameon=False, loc="lower left")
     style(ax)
 
     # Bottom 2 and 3: total and local-search time
@@ -319,6 +341,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs" / "lattice2d.yaml")
     p.add_argument("--n", type=int, default=100)
+    p.add_argument("--skip-calibration", action="store_true",
+                   help="don't measure D_eff at all; requires --d-ref (L91)")
     p.add_argument("--cal-t-max", type=float, default=3000.0)
     p.add_argument("--short-lag", type=float, default=50.0)
     p.add_argument("--long-lag", type=float, default=500.0)
@@ -343,6 +367,8 @@ def main():
                    help="copy calibration CSVs from this run directory; valid because calibration runs have no "
                         "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
     args = p.parse_args()
+    if args.skip_calibration and args.d_ref is None:
+        p.error("--skip-calibration needs --d-ref: without a measured D_eff there is nothing to match")
 
     global SIZES, FREE_FRACTION, DWELLS, REF_LABEL
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
@@ -366,10 +392,18 @@ def main():
                 shutil.copy(args.reuse_calibration / name, out / name)
         print(f"   reusing calibration from {args.reuse_calibration}", flush=True)
 
-    print("1. D_eff calibration", flush=True)
-    cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
-    phi = args.phi if args.phi is not None else float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # D_eff per unit D
-    d_eff = cal[cal.role == "switch"].d_eff.to_numpy()
+    if args.skip_calibration:  # L91: reference at a fixed D, nothing measured from the simulation
+        print("1. D_eff calibration skipped (--skip-calibration)", flush=True)
+        cal = pd.DataFrame([dict(label=f"switch: bound {d * 1e3:g} ms", d_eff=np.nan, d_eff_se=np.nan,
+                                 d_eff_short=np.nan, role="switch", bound_dwell=d) for d in DWELLS])
+        cal.to_csv(out / "calibration.csv", index=False)
+        phi = args.phi if args.phi is not None else np.nan
+        d_eff = cal.d_eff.to_numpy()
+    else:
+        print("1. D_eff calibration", flush=True)
+        cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
+        phi = args.phi if args.phi is not None else float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # D_eff per unit D
+        d_eff = cal[cal.role == "switch"].d_eff.to_numpy()
     d_ref = d_eff / phi if args.d_ref is None else np.full(len(DWELLS), args.d_ref)
     stored = out / f"runs_a{SIZES[0] * 1e3:.0f}nm" / "config.json"
     if stored.exists():  # resume: reuse the exact stored values (the CSV round trip can change the last bit)
