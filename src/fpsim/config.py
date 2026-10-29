@@ -223,7 +223,13 @@ def from_dict(d: dict) -> Config:
         kwargs[key] = cls(**section)
     if "sweeps" in d:
         sweeps = []
-        for name, spec in (d["sweeps"] or {}).items():
+        # YAML gives {name: spec}; to_dict() (via dataclasses.asdict) gives [{name: ..., ...}].
+        # Accept both, so from_dict(cfg.to_dict()) round-trips and a stored config.json can be
+        # read back to re-simulate exactly what was run (L103).
+        raw = d["sweeps"] or {}
+        items = ([(s["name"], {k: v for k, v in s.items() if k != "name"}) for s in raw]
+                 if isinstance(raw, (list, tuple)) else list(raw.items()))
+        for name, spec in items:
             spec = dict(spec or {})
             bad = set(spec) - set(SWEEP_KEYS)
             if bad:
