@@ -68,6 +68,22 @@ PLANS = {
                  receptors_per_cell=[1000]),
         ],
     ),
+    # The ring-2 blocks of matrix_d05 (density grid, dwell line, efficiency line) moved to ring 3,
+    # with every t_max doubled (L102). 57 cells in 13 reuse groups.
+    "ring3_t2x": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="d05", n=400, layouts=20, dwells="1", t_max=40000),
+        blocks=[
+            dict(free_fraction=FREES, finds=[1, 5], target_ring=[3],
+                 receptors_per_cell=[100, 300, 1000, 3000, 10000]),
+            dict(free_fraction=[BASE_FREE], finds=[1], target_ring=[3], receptors_per_cell=[1000],
+                 dwells=["0.01", "0.1", "1", "10"]),
+            dict(free_fraction=[BASE_FREE], finds=[1], target_ring=[3], receptors_per_cell=[1000],
+                 dwells=["100", "600"], t_max=200000),
+            dict(free_fraction=[BASE_FREE], finds=[1, 2, 5, 10], target_ring=[3],
+                 receptors_per_cell=[1000]),
+        ],
+    ),
 }
 
 
@@ -143,6 +159,14 @@ def main():
     p.add_argument("--print-n-tasks", action="store_true", help="array size for sbatch")
     p.add_argument("--list", action="store_true", help="print every cell in this stage")
     p.add_argument("--dry-run", action="store_true", help="with --array-task, print the command only")
+    p.add_argument("--shards", type=int, default=1,
+                   help="split every cell into M tasks via the driver's --shard K/M (scheduling only, L102). "
+                        "Sharded cells need a --replot pass once all their shards are done")
+    p.add_argument("--pack", type=int, default=1,
+                   help="one array task runs G consecutive tasks in turn, so short tasks add up to a "
+                        "worthwhile job (L102)")
+    p.add_argument("--replot", action="store_true",
+                   help="summarise and plot each cell of the stage from the chunks on disk (no shards)")
     p.add_argument("--extra", nargs=argparse.REMAINDER, default=[],
                    help="everything after this is appended to the driver command (e.g. --extra --shard 0/4)")
     args = p.parse_args()
@@ -156,30 +180,42 @@ def main():
     else:
         tasks = [(c, None) for c in cells]
 
+    m = 1 if args.replot else max(args.shards, 1)
+    tasks = [(cell, base, k) for cell, base in tasks for k in range(m)]
+    g = max(args.pack, 1)
+    n_jobs = -(-len(tasks) // g)
+
     if args.print_n_tasks:
-        print(len(tasks))
+        print(n_jobs)
         return
     if args.list:
         print(f"plan {args.plan}: {len(cells)} cells, {len(bases)} reuse groups "
-              f"-> stage {args.stage} has {len(tasks)} tasks")
-        for i, (cell, base) in enumerate(tasks):
-            print(f"{i:4d}  {label(cell)}" + (f"   [reuses {label(base)}]" if base else ""))
+              f"-> stage {args.stage} has {len(tasks)} tasks in {n_jobs} array tasks")
+        for i, (cell, base, k) in enumerate(tasks):
+            print(f"{i:4d}  {label(cell)}" + (f"  shard {k}/{m}" if m > 1 else "")
+                  + (f"   [reuses {label(base)}]" if base else ""))
         return
     if args.array_task is None:
         p.error("give --array-task, --list or --print-n-tasks")
-    if not 0 <= args.array_task < len(tasks):
-        p.error(f"--array-task must be 0..{len(tasks) - 1} for stage {args.stage}; got {args.array_task}")
+    if not 0 <= args.array_task < n_jobs:
+        p.error(f"--array-task must be 0..{n_jobs - 1} for stage {args.stage}; got {args.array_task}")
 
-    cell, base = tasks[args.array_task]
-    cmd = [sys.executable, str(DRIVER), *flags(cell)]
-    if base is not None:
-        cmd += ["--reuse-reference", out_dir(base)]
-    cmd += args.extra
-    print(f"task {args.array_task}/{len(tasks)}: {label(cell)}", flush=True)
-    print(" ".join(cmd), flush=True)
-    if args.dry_run:
-        return
-    raise SystemExit(subprocess.run(cmd, cwd=PROJECT_ROOT).returncode)
+    failed = 0
+    for t in range(args.array_task * g, min((args.array_task + 1) * g, len(tasks))):
+        cell, base, k = tasks[t]
+        cmd = [sys.executable, str(DRIVER), *flags(cell)]
+        if base is not None:
+            cmd += ["--reuse-reference", out_dir(base)]
+        if args.replot:
+            cmd += ["--replot"]
+        elif m > 1:
+            cmd += ["--shard", f"{k}/{m}"]
+        cmd += args.extra
+        print(f"task {t}/{len(tasks)}: {label(cell)}" + (f"  shard {k}/{m}" if m > 1 else ""), flush=True)
+        print(" ".join(cmd), flush=True)
+        if not args.dry_run:
+            failed += subprocess.run(cmd, cwd=PROJECT_ROOT).returncode != 0
+    raise SystemExit(1 if failed else 0)
 
 
 if __name__ == "__main__":
