@@ -167,7 +167,7 @@ def main():
     p.add_argument("--k-layer", type=float, default=900.0, help="binding rate inside the layer, 1/s")
     p.add_argument("--t-max", type=float, default=90.0, help="seconds of the walk to show")
     p.add_argument("--stride", type=int, default=100, help="steps per recorded frame")
-    p.add_argument("--half", type=float, default=21.5, help="half-width of the view, um")
+    p.add_argument("--half", type=float, default=16.5, help="half-width of the view, um")
     p.add_argument("--animate", action="store_true", help="also write the mp4 of the same walk")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--seconds", type=float, default=18.0, help="length of the movie")
