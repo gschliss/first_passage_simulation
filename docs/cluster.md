@@ -4,6 +4,9 @@ How to clone this project onto a SLURM cluster, reproduce the D = 0.5 matrix
 (`docs/report_d05.md`), and then grow it. Read `docs/handoff.md` first for the model itself;
 this file is only about getting it to run somewhere bigger.
 
+**On Sherlock (Stanford), read §10 first** — it gives the concrete paths, modules and
+partition for that cluster, and the rest of this file then reads as background.
+
 **The shape of the problem.** One *cell* is one `dimension_experiment.py` invocation: a
 switching walker and its free-only reference, over the same shared receptor layouts, at one
 point in parameter space. Cells are completely independent, so a matrix of them is a plain
@@ -328,8 +331,9 @@ The model gotchas are in `docs/handoff.md` §5 and still apply. These are the on
 show up on a cluster:
 
 - **Numba's compile cache on a shared filesystem.** Concurrent tasks writing one cache
-  directory corrupt it. `submit_matrix.sh` gives each task its own `NUMBA_CACHE_DIR` under
-  `$TMPDIR` and deletes it on exit. Keep that if you write your own submit script.
+  directory corrupt it. `submit_matrix.sh` gives each task its own `NUMBA_CACHE_DIR` on
+  node-local disk (`$L_SCRATCH` if the site sets it, else `$TMPDIR`) and deletes it on exit.
+  Keep that if you write your own submit script.
 - **`results/` must be on a filesystem that supports `os.link`.** `jobs.write_once` uses a
   hard link to make `config.json` creation atomic between concurrent tasks. Scratch and home
   filesystems are fine; some FUSE mounts are not.
@@ -351,3 +355,93 @@ per array task from a config file's own `sweeps:` block, writing to `results/run
 have no switching-vs-reference pairing, no shared layouts and no t_20. They are still the right
 tool for a plain single-walker sweep defined entirely in YAML. Everything in the report came
 through the `sweep.py` path described above.
+
+## 10. Sherlock (Stanford)
+
+Sherlock is SLURM, so everything above applies. These are the parts that differ, checked
+against Stanford Research Computing's own docs (October 2026).
+
+**`gh` is not there, so don't plan on `gh auth login`.** Use the read-only deploy key from §1;
+it needs only `ssh-keygen` and `git`, which are always present.
+
+If `ssh -T git@github.com` hangs or is refused, outbound port 22 is blocked. GitHub serves
+SSH on 443 as well, which gets through:
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  HostName ssh.github.com
+  Port 443
+  User git
+  IdentityFile ~/.ssh/id_ed25519_fpsim
+  IdentitiesOnly yes
+EOF
+```
+
+**Where things go.** Sherlock gives you several filesystems with very different quotas:
+
+| | quota | notes | use it for |
+|---|---|---|---|
+| `$HOME` | 15 GB | NFS, not for parallel I/O | nothing here, it is too small to be worth the risk |
+| `$GROUP_HOME` | 1 TB | shared with your PI group | **the clone and the venv** |
+| `$SCRATCH` | 100 TB | files expire after a period without modification | **`results/`** |
+| `$OAK` | purchased | long-term, if your lab has it | results you want to keep past the purge window |
+| `$L_SCRATCH` | node-local SSD | deleted when the job ends | Numba's compile cache (the submit script already uses it) |
+
+So:
+
+```bash
+cd $GROUP_HOME
+git clone git@github.com:gschliss/first_passage_simulation.git
+cd first_passage_simulation
+mkdir -p $SCRATCH/fpsim_results
+rm -rf results && ln -s $SCRATCH/fpsim_results results
+mkdir -p slurm/logs
+```
+
+Mind the `$SCRATCH` purge policy: it keys off last *modification*, and finished Parquet
+chunks are never rewritten, so a matrix you leave alone will eventually age out. Copy
+anything you care about to `$OAK`, or back to your laptop, when a sweep finishes.
+
+**Build the environment in an `sh_dev` session, not on a login node.** Stanford asks you to
+keep login nodes free, and says outright that building environments there is too heavy:
+
+```bash
+sh_dev -c 4 -m 8GB          # a compute node: 1 h, which is plenty
+ml avail python             # see the stack as it is today
+ml python/3.12.1
+python3 -m venv .venv       # note python3: plain `python` is an old system interpreter
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[dev]"
+python scripts/check_env.py
+python -m pytest -q
+```
+
+Once the venv is activated, plain `python` is the right one, which is why the commands
+elsewhere in this file work unchanged from there.
+
+**Submitting.** `sh_part` lists the partitions you can actually use. The `normal` partition
+defaults to a 2-hour limit and allows 2 days, so the 6 hours in `submit_matrix.sh` is fine
+but must be stated explicitly — it is above the default. If your lab owns nodes, `owners`
+allows 7 days but your jobs there can be preempted, which is safe for this work since every
+task resumes from the chunks already on disk.
+
+Add the partition to `slurm/submit_matrix.sh` (uncomment and edit the `#SBATCH --partition`
+line), set the activation line to:
+
+```bash
+ml python/3.12.1
+source .venv/bin/activate
+```
+
+and submit as in §5:
+
+```bash
+N=$(python scripts/sweep.py --plan matrix_d05 --stage all --print-n-tasks)
+sbatch --array=0-$((N-1))%40 slurm/submit_matrix.sh matrix_d05 all
+```
+
+**Run `check_env.py` again inside a job**, not just in `sh_dev`. It reports the cores the
+process may really use, and a compute node under a cgroup can differ from an interactive
+session.

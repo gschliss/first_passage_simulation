@@ -30,8 +30,9 @@ shift 2
 # Numba uses exactly the cores SLURM gave this task. Results do not depend on the thread
 # count (one RNG seed per molecule), so this is free to differ from the 8 used locally (L89).
 export NUMBA_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
-# Per-task compile cache on local disk: avoids concurrent writes on a shared filesystem.
-export NUMBA_CACHE_DIR=${TMPDIR:-/tmp}/fpsim_numba_${SLURM_JOB_ID:-0}_${SLURM_ARRAY_TASK_ID:-0}
+# Per-task compile cache on node-local disk: avoids concurrent writes on a shared filesystem.
+# $L_SCRATCH is Sherlock's node-local SSD, purged when the job ends; TMPDIR elsewhere.
+export NUMBA_CACHE_DIR=${L_SCRATCH:-${TMPDIR:-/tmp}}/fpsim_numba_${SLURM_JOB_ID:-0}_${SLURM_ARRAY_TASK_ID:-0}
 trap 'rm -rf "$NUMBA_CACHE_DIR"' EXIT
 
 echo "host $(hostname)  task ${SLURM_ARRAY_TASK_ID}  threads ${NUMBA_NUM_THREADS}  commit $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
