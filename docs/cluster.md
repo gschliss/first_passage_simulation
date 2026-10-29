@@ -392,13 +392,16 @@ EOF
 | `$HOME` | 15 GB | NFS, not for parallel I/O | nothing here, it is too small to be worth the risk |
 | `$GROUP_HOME` | 1 TB | shared with your PI group | **the clone and the venv** |
 | `$SCRATCH` | 100 TB | files expire after a period without modification | **`results/`** |
-| `$OAK` | purchased | long-term, if your lab has it | results you want to keep past the purge window |
+| `$OAK` | purchased | long-term, if your lab has it; **"not designed for bursty or parallel job I/O"** | the clone, and finished results copied back off `$SCRATCH` |
 | `$L_SCRATCH` | node-local SSD | deleted when the job ends | Numba's compile cache (the submit script already uses it) |
 
-So:
+The code can sit on `$GROUP_HOME` or, if your lab has it, on `$OAK` — it is small and read
+once per task, so either is fine. What matters is that **`results/` goes on `$SCRATCH`**:
+dozens of array tasks writing Parquet chunks at once is precisely the parallel I/O that
+`$OAK` and the NFS homes are not built for.
 
 ```bash
-cd $GROUP_HOME
+cd $OAK/<you>/...            # or $GROUP_HOME
 git clone https://github.com/gschliss/first_passage_simulation.git
 cd first_passage_simulation
 mkdir -p $SCRATCH/fpsim_results
@@ -407,8 +410,22 @@ mkdir -p slurm/logs
 ```
 
 Mind the `$SCRATCH` purge policy: it keys off last *modification*, and finished Parquet
-chunks are never rewritten, so a matrix you leave alone will eventually age out. Copy
-anything you care about to `$OAK`, or back to your laptop, when a sweep finishes.
+chunks are never rewritten, so a matrix you leave alone will eventually age out. When a sweep
+finishes, copy it somewhere permanent — which is what `$OAK` is for:
+
+```bash
+rsync -a $SCRATCH/fpsim_results/ $OAK/<you>/fpsim_results/
+```
+
+Put the **virtual environment on `$GROUP_HOME`**, not on `$OAK` and not inside a repo that
+lives there — Stanford's docs ask for venvs on `$HOME` or `$GROUP_HOME`. An editable install
+works fine with the two split apart:
+
+```bash
+python3 -m venv $GROUP_HOME/fpsim-venv
+source $GROUP_HOME/fpsim-venv/bin/activate
+pip install -e ".[dev]"      # run from the checkout, wherever it lives
+```
 
 **Build the environment in an `sh_dev` session, not on a login node.** Stanford asks you to
 keep login nodes free, and says outright that building environments there is too heavy:
@@ -417,8 +434,8 @@ keep login nodes free, and says outright that building environments there is too
 sh_dev -c 4 -m 8GB          # a compute node: 1 h, which is plenty
 ml avail python             # see the stack as it is today
 ml python/3.12.1
-python3 -m venv .venv       # note python3: plain `python` is an old system interpreter
-source .venv/bin/activate
+python3 -m venv $GROUP_HOME/fpsim-venv   # python3: plain `python` is an old system interpreter
+source $GROUP_HOME/fpsim-venv/bin/activate
 pip install --upgrade pip
 pip install -e ".[dev]"
 python scripts/check_env.py
@@ -439,7 +456,7 @@ line), set the activation line to:
 
 ```bash
 ml python/3.12.1
-source .venv/bin/activate
+source $GROUP_HOME/fpsim-venv/bin/activate
 ```
 
 and submit as in §5:
