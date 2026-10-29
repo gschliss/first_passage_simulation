@@ -38,6 +38,32 @@ raises t_20 from **84 s to 297 s**. And requiring five receptor encounters inste
 one costs the switching walker **2%** (211 → 216 s) while costing the reference **9.7×**
 (297 → 2869 s).
 
+## What t_20 is reading off
+
+![Cumulative capture along the fraction-free cline](figures/capture_free_fraction.png)
+
+Every t_20 in this report is one point on a curve like these: the fraction of **all**
+molecules captured by time t, and t_20 is where it crosses 0.20 (the dots). Two things are
+worth seeing directly rather than taking on trust.
+
+First, the curves level off at each condition's capture fraction, **not at 1**. Molecules that
+escape the cluster never arrive, so a curve that plateaus below 0.20 has no t_20 at all —
+that is what the blank cells in the grids mean. Second, the curves within a panel are close to
+a single rising front shifted along the time axis, which is what makes one crossing time a
+fair summary of the whole distribution.
+
+There is a matching `capture_*.png` for each cline, drawn from the same runs as the
+corresponding `line_*.png`: `capture_free_fraction`, `capture_dwell`, `capture_efficiency`,
+`capture_distance`, `capture_distance_N5`, `capture_density`, `capture_density_N5`. The
+efficiency one is the clearest single picture in the set — the four switching curves lie
+almost on top of each other while the free-only curves fan out and the N = 10 curve never
+reaches 0.20.
+
+A detail that falls out of these: along the dwell cline the free-only reference is one run
+repeated, and its last capture is at 2789 s. Raising `t_max` from 20 000 s to 100 000 s for
+the long-dwell points changed it not at all, so the reference's 76% ceiling at ring 2 is set
+by **escapes, not by the time limit**.
+
 ## Two-dimensional sweeps
 
 ### Fraction free × distance
