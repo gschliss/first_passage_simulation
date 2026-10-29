@@ -1,5 +1,13 @@
 # Running sweeps on SLURM
 
+**Two paths. For the paired switching-vs-reference experiments behind `docs/report_d05.md`,
+use `slurm/submit_matrix.sh` and read `docs/cluster.md` — not this file.** One array task
+there is one matrix cell (`scripts/sweep.py`).
+
+The rest of this file describes the older per-config path (`scripts/run.py`), which predates
+the paired design: no switching/reference pairing, no shared layouts, no t_20. It is still the
+right tool for a plain single-walker sweep defined entirely in a config's `sweeps:` block.
+
 Each array task runs one chunk (a batch of molecules at one sweep point) with
 `scripts/run.py`; chunks are independent, so tasks can run in any order and on any
 nodes. Results land in `results/runs/<config name>/`.

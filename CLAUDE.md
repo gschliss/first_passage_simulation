@@ -12,6 +12,8 @@ in `docs/model_notes.md` (L1 onward). Add every new decision or result there as 
   D_eff calibration in `deff.py`; chunked runs, merging and config hashes in `jobs.py`.
 - Experiments are defined by YAML in `configs/` and overridden by script flags (mainly
   `scripts/dimension_experiment.py`). Outputs go to `results/` (gitignored, not on GitHub).
+- A matrix of experiments is a plan in `scripts/sweep.py`; one cell per SLURM array task via
+  `slurm/submit_matrix.sh`. Cluster instructions are in `docs/cluster.md`.
 - New config fields must be left out of `Config.to_dict()` at their defaults, so earlier runs keep their
   config hashes.
 - Validate new physics against an analytical case where one exists (`src/fpsim/validation.py`,

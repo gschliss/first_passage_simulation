@@ -1,0 +1,186 @@
+"""Enumerate a parameter matrix as independent cells and run one of them (L97).
+
+One cell is one `dimension_experiment.py` invocation: a switching walker and its free-only
+reference over the same shared receptor layouts. Cells do not talk to each other, so a whole
+matrix is a SLURM array over cell indices. See `docs/cluster.md`.
+
+    python scripts/sweep.py --plan matrix_d05 --list
+    python scripts/sweep.py --plan matrix_d05 --stage base --print-n-tasks
+    python scripts/sweep.py --plan matrix_d05 --stage base --array-task 0
+
+A plan is a list of blocks; each block is a cross product of axis values. Cells that come out
+identical (blocks overlap by design -- the density and distance grids share a corner) are
+deduplicated, first occurrence winning. To enlarge a sweep, add axis values or a block below.
+
+Reference reuse and the two stages
+----------------------------------
+The free-only reference never binds, so its trajectories do not depend on the free fraction or
+the bound dwell (L95, verified bit-identical). It also costs ~97% of the compute (L95). Cells
+therefore fall into reuse groups: everything that shares a reference. Within a group, one
+"base" cell computes the reference and the rest copy it.
+
+    --stage base   the group representatives; no dependencies, run these first
+    --stage rest   the others, each with --reuse-reference pointing at its base cell
+    --stage all    every cell, each computing its own reference (no dependency, ~5x the
+                   core-hours, one array instead of two -- usually the better trade)
+
+Only `--stage rest` requires that `--stage base` has finished.
+"""
+
+from __future__ import annotations
+
+import argparse
+import itertools
+import subprocess
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DRIVER = PROJECT_ROOT / "scripts" / "dimension_experiment.py"
+
+# Axis values that appear in several blocks.
+FREES = [0.001, 0.01, 0.05, 0.2, 0.5]
+BASE_FREE = 0.05  # the free fraction whose cell computes the reference for its group
+
+# Flags that do NOT change the free-only reference, so cells differing only in these share one.
+# The reference never binds, so neither the free fraction nor the dwell *value* reaches it. The
+# dwell *count* does, because molecule seeds depend on the sweep index, so group_key keeps it.
+# t_max is deliberately absent: a different ceiling is a different reference run.
+NOT_IN_REFERENCE = ("free_fraction", "dwells")
+
+PLANS = {
+    # The matrix behind docs/report_d05.md (L96). 87 cells.
+    "matrix_d05": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="d05", n=400, layouts=20, dwells="1"),
+        blocks=[
+            dict(free_fraction=FREES, finds=[1, 5], target_ring=[1, 2, 3, 4],
+                 receptors_per_cell=[1000]),
+            dict(free_fraction=FREES, finds=[1, 5], target_ring=[2],
+                 receptors_per_cell=[100, 300, 1000, 3000, 10000]),
+            # Dwell line. 100 s and 600 s need a higher ceiling, which changes the run (and the
+            # reference), so they form their own groups rather than reusing the 20 000 s one.
+            dict(free_fraction=[BASE_FREE], finds=[1], target_ring=[2], receptors_per_cell=[1000],
+                 dwells=["0.01", "0.1", "1", "10"]),
+            dict(free_fraction=[BASE_FREE], finds=[1], target_ring=[2], receptors_per_cell=[1000],
+                 dwells=["100", "600"], t_max=100000),
+            dict(free_fraction=[BASE_FREE], finds=[1, 2, 5, 10], target_ring=[2],
+                 receptors_per_cell=[1000]),
+        ],
+    ),
+}
+
+
+def expand(plan):
+    """Blocks -> an ordered, deduplicated list of cells (each a dict of driver flags)."""
+    cells, seen = [], set()
+    for block in plan["blocks"]:
+        axes = {k: (v if isinstance(v, list) else [v]) for k, v in block.items()}
+        for combo in itertools.product(*axes.values()):
+            cell = dict(plan["common"], **dict(zip(axes, combo)))
+            key = tuple(sorted((k, str(v)) for k, v in cell.items()))
+            if key not in seen:
+                seen.add(key)
+                cells.append(cell)
+    return cells
+
+
+def group_key(cell):
+    """Cells with the same key share a free-only reference."""
+    n_dwells = len(str(cell.get("dwells", "")).split(","))
+    return (tuple(sorted((k, str(v)) for k, v in cell.items() if k not in NOT_IN_REFERENCE)),
+            n_dwells)
+
+
+def split_stages(cells):
+    """(base cells, [(cell, its base cell), ...]). The base of a group is its BASE_FREE cell if
+    the group has one, else its first cell."""
+    groups = {}
+    for cell in cells:
+        groups.setdefault(group_key(cell), []).append(cell)
+    base_of, bases = {}, []
+    for key, members in groups.items():
+        base = next((c for c in members if c.get("free_fraction") == BASE_FREE), members[0])
+        bases.append(base)
+        base_of[key] = base
+    rest = [(c, base_of[group_key(c)]) for c in cells if c not in bases]
+    # Keep the plan's order so a task index is stable as long as the plan is.
+    bases = [c for c in cells if c in bases]
+    return bases, rest
+
+
+def flags(cell):
+    out = []
+    for k, v in cell.items():
+        name = "--" + k.replace("_", "-")
+        if v is True:
+            out.append(name)
+        elif v is not False and v is not None:
+            out += [name, str(v)]
+    return out
+
+
+def out_dir(cell):
+    """Ask the driver where this cell lands; the naming rules live there, not here."""
+    r = subprocess.run([sys.executable, str(DRIVER), *flags(cell), "--print-out-dir"],
+                       capture_output=True, text=True, cwd=PROJECT_ROOT)
+    if r.returncode != 0:
+        raise SystemExit(f"could not resolve the run directory:\n{r.stderr}")
+    return r.stdout.strip()
+
+
+def label(cell):
+    return " ".join(f"{k}={v}" for k, v in sorted(cell.items())
+                    if k in ("free_fraction", "finds", "target_ring", "receptors_per_cell",
+                             "dwells", "t_max"))
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--plan", default="matrix_d05", choices=sorted(PLANS))
+    p.add_argument("--stage", default="all", choices=("base", "rest", "all"))
+    p.add_argument("--array-task", type=int, help="run this cell (0-based)")
+    p.add_argument("--print-n-tasks", action="store_true", help="array size for sbatch")
+    p.add_argument("--list", action="store_true", help="print every cell in this stage")
+    p.add_argument("--dry-run", action="store_true", help="with --array-task, print the command only")
+    p.add_argument("--extra", nargs=argparse.REMAINDER, default=[],
+                   help="everything after this is appended to the driver command (e.g. --extra --shard 0/4)")
+    args = p.parse_args()
+
+    cells = expand(PLANS[args.plan])
+    bases, rest = split_stages(cells)
+    if args.stage == "base":
+        tasks = [(c, None) for c in bases]
+    elif args.stage == "rest":
+        tasks = rest
+    else:
+        tasks = [(c, None) for c in cells]
+
+    if args.print_n_tasks:
+        print(len(tasks))
+        return
+    if args.list:
+        print(f"plan {args.plan}: {len(cells)} cells, {len(bases)} reuse groups "
+              f"-> stage {args.stage} has {len(tasks)} tasks")
+        for i, (cell, base) in enumerate(tasks):
+            print(f"{i:4d}  {label(cell)}" + (f"   [reuses {label(base)}]" if base else ""))
+        return
+    if args.array_task is None:
+        p.error("give --array-task, --list or --print-n-tasks")
+    if not 0 <= args.array_task < len(tasks):
+        p.error(f"--array-task must be 0..{len(tasks) - 1} for stage {args.stage}; got {args.array_task}")
+
+    cell, base = tasks[args.array_task]
+    cmd = [sys.executable, str(DRIVER), *flags(cell)]
+    if base is not None:
+        cmd += ["--reuse-reference", out_dir(base)]
+    cmd += args.extra
+    print(f"task {args.array_task}/{len(tasks)}: {label(cell)}", flush=True)
+    print(" ".join(cmd), flush=True)
+    if args.dry_run:
+        return
+    raise SystemExit(subprocess.run(cmd, cwd=PROJECT_ROOT).returncode)
+
+
+if __name__ == "__main__":
+    main()

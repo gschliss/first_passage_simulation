@@ -25,6 +25,9 @@ NUMBA_NUM_THREADS=8 .venv/bin/python -m pytest -q    # 73 tests; the first run c
 **Suggested first message to Claude on the new machine:** "Read docs/handoff.md, docs/model_notes.md
 and CLAUDE.md, then summarize where the project stands before doing anything."
 
+Running this on a cluster instead: see `docs/cluster.md` (clone, environment, the SLURM array
+over matrix cells, and how to enlarge the sweep).
+
 ## 2. The question and the model in one paragraph
 
 How does switching between dimensions affect first-passage time to receptors in a packed lattice of

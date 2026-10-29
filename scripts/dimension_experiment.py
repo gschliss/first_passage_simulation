@@ -149,9 +149,15 @@ def copy_points(ecfg, src_dir, run_dir, layouts, which):
             dst.with_suffix(".json").write_text(json.dumps(meta, indent=2))
 
 
-def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None, reuse_reference=None):
+def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None, reuse_reference=None, shard=None):
     """``layouts`` > 1: each point runs ``layouts`` chunks of n // layouts molecules, chunk c on
-    shared receptor layout c, so switching and reference points see the same layouts (L57)."""
+    shared receptor layout c, so switching and reference points see the same layouts (L57).
+
+    ``shard`` is (k, m): run only every m-th (point, layout) chunk, starting at k. Chunks are
+    independent and run_task skips ones already on disk, so m processes with k = 0..m-1 split
+    one cell across nodes and any of them can be re-run safely (L97). It is a scheduling knob
+    only -- it never reaches the config, so it cannot change a hash or a result.
+    """
     dirs = {}
     for a in SIZES:
         ecfg = experiment_config(cfg, d_ref, a)
@@ -165,11 +171,12 @@ def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None, reuse_refe
             if not (run_dir / "config.json").exists():
                 (run_dir / "config.json").write_text(json.dumps(manifest, indent=2, default=float))
             copy_points(ecfg, src / f"runs_a{a * 1e3:.0f}nm", run_dir, layouts, which)
-        for i in range(ecfg.n_sweep_points):
-            for c in range(layouts):
-                extra = {"layout_seed": c} if layouts > 1 else {}
-                path = run_task(ecfg, Task(i, c), n // layouts, run_dir, **extra)
-                print(f"  a = {a * 1e3:.0f} nm, point {i}, layout {c}: {'done' if path else 'exists'}", flush=True)
+        for j, (i, c) in enumerate((i, c) for i in range(ecfg.n_sweep_points) for c in range(layouts)):
+            if shard is not None and j % shard[1] != shard[0]:
+                continue
+            extra = {"layout_seed": c} if layouts > 1 else {}
+            path = run_task(ecfg, Task(i, c), n // layouts, run_dir, **extra)
+            print(f"  a = {a * 1e3:.0f} nm, point {i}, layout {c}: {'done' if path else 'exists'}", flush=True)
         dirs[a] = run_dir
     return dirs
 
@@ -431,6 +438,13 @@ def main():
                    help="copy free-only reference chunks from this earlier run directory. Valid when the ring, "
                         "receptor count, --finds, --d-ref, --layouts, --n and the number of dwells all match: the "
                         "reference never binds, so it does not depend on the free fraction or the dwell (L95)")
+    p.add_argument("--print-out-dir", action="store_true",
+                   help="print the run directory this invocation would use, then exit. The naming rules live "
+                        "here, so schedulers should ask rather than re-derive them (L97)")
+    p.add_argument("--shard", default=None, metavar="K/M",
+                   help="run only every M-th capture chunk, starting at K (0-based), so one cell can be split "
+                        "across M nodes (L97). Scheduling only: it does not affect results. Follow the shards "
+                        "with a --replot pass to summarise and plot once every chunk is on disk")
     p.add_argument("--reuse-calibration", type=Path, default=None,
                    help="copy calibration CSVs from this run directory; valid because calibration runs have no "
                         "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
@@ -439,6 +453,15 @@ def main():
         p.error("--skip-calibration needs --d-ref: without a measured D_eff there is nothing to match")
     if args.free_fraction == 1.0 and len(args.dwells.split(",")) != 1:
         p.error("--free-fraction 1.0 has no bound state, so it is a single point: give one --dwells value")
+    shard = None
+    if args.shard is not None:
+        try:
+            k, m = (int(v) for v in args.shard.split("/"))
+        except ValueError:
+            p.error(f"--shard wants K/M, e.g. 0/8; got {args.shard!r}")
+        if not 0 <= k < m:
+            p.error(f"--shard K must be in 0..M-1; got {args.shard}")
+        shard = (k, m)
 
     global SIZES, FREE_FRACTION, DWELLS, REF_LABEL
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
@@ -458,6 +481,9 @@ def main():
     if args.tag:
         cfg = dataclasses.replace(cfg, name=cfg.name + f"_{args.tag}")
     out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
+    if args.print_out_dir:
+        print(out)
+        return
     out.mkdir(parents=True, exist_ok=True)
     if args.reuse_calibration:
         for name in ("calibration.csv",) + (("calibration_reference.csv",) if args.d_ref is None else ()):
@@ -497,7 +523,10 @@ def main():
 
     if not args.replot:
         print("3. capture runs", flush=True)
-        capture_runs(cfg, d_ref, out, args.n, args.layouts, args.reuse_switching, args.reuse_reference)
+        capture_runs(cfg, d_ref, out, args.n, args.layouts, args.reuse_switching, args.reuse_reference, shard)
+        if shard is not None:  # other shards still owe chunks; summarising now would read a partial run
+            print(f"shard {shard[0]}/{shard[1]} done. Run again with --replot once every shard has finished.")
+            return
 
     s, molecules = summarize(out)
     s.to_csv(out / "summary.csv", index=False)
