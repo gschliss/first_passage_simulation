@@ -28,14 +28,91 @@ git clone git@github.com:gschliss/first_passage_simulation.git
 cd first_passage_simulation
 ```
 
-The repo is **private**, so the clone needs your GitHub credentials. Check which mechanism
-this cluster has and use the matching URL:
+The repo is **private**, so the clone needs credentials.
+
+### If the machine is already signed in to GitHub
+
+Find out which mechanism it has, and use the matching URL:
 
 ```bash
 ssh -T git@github.com                  # SSH key  -> "Hi gschliss! You've successfully authenticated"
 gh auth status                         # gh CLI   -> then: gh repo clone gschliss/first_passage_simulation
 git config --get credential.helper     # stored token -> the https:// URL works directly
 ```
+
+### If it is not signed in
+
+**Preferred: a read-only deploy key.** It is scoped to this one repository and revocable on
+its own, so a shared cluster never holds credentials for the rest of your account. The
+cluster only needs to *pull* — results come home by `rsync`, not through git — so read-only
+is enough.
+
+On the cluster:
+
+```bash
+ssh-keygen -t ed25519 -C "fpsim deploy key (cluster)" -f ~/.ssh/id_ed25519_fpsim -N ""
+chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_ed25519_fpsim
+cat ~/.ssh/id_ed25519_fpsim.pub
+```
+
+`-N ""` leaves the key without a passphrase. That is the usual trade for an unattended
+machine and is acceptable here *because* the key is read-only and single-repo; nothing in the
+job scripts does network git, so a passphrase would only ever be prompting you interactively.
+
+Paste the printed public key at
+**github.com/gschliss/first_passage_simulation/settings/keys** → *Add deploy key*. Leave
+"Allow write access" unticked. Then tell SSH to use it, since it is not a default key name:
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.ssh/id_ed25519_fpsim
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+ssh -T git@github.com
+```
+
+A deploy key authenticates to the *repository*, not to you, so the greeting reads **"Hi
+gschliss/first_passage_simulation!"** rather than your username. That is success, not a
+misconfiguration. Now clone with the SSH URL as above.
+
+**Alternative: `gh auth login`.** Pick *Login with a web browser*; it prints a one-time code
+you enter on your laptop, so it works over a plain SSH session with no browser on the
+cluster. Follow it with `gh auth setup-git` to make `https://` clones work too. Simpler than
+a deploy key, but it signs the cluster in to your whole account.
+
+**Alternative: a fine-grained token over HTTPS.** Create one at
+*github.com/settings/personal-access-tokens*, scoped to this repository with *Contents:
+Read-only*, and give it as the password when git prompts. Do **not** run
+`git config --global credential.helper store` on a cluster — it writes the token in plaintext
+to `~/.git-credentials` on a shared filesystem. Use `credential.helper 'cache --timeout=3600'`
+if you want to avoid retyping it; that keeps it in memory only.
+
+### If the cluster has no outbound access to GitHub at all
+
+Some sites firewall even the login nodes. Carry the repository over as a bundle — a single
+file holding the complete history:
+
+```bash
+# on your laptop, in the repo
+git bundle create /tmp/fpsim.bundle --all
+scp /tmp/fpsim.bundle cluster:/projects/$USER/
+```
+
+```bash
+# on the cluster
+cd /projects/$USER
+git clone -b main fpsim.bundle first_passage_simulation
+cd first_passage_simulation
+git remote set-url origin git@github.com:gschliss/first_passage_simulation.git
+```
+
+The bundle is ~1.3 MB for this repo and clones to a normal working checkout. The last line
+matters: without it `origin` points at the bundle file, which no longer updates. To refresh
+later, make a new bundle and `git pull /path/to/new.bundle main`.
+
+### Keeping the output off a purged or quota'd filesystem
 
 If scratch is purged on a schedule, keep the clone on a persistent filesystem and point only
 the output at scratch:
