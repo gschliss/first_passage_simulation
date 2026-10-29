@@ -16,14 +16,41 @@ the same array again.
 
 ---
 
-## 1. Clone and build the environment
+## 1. Pick where it goes, and clone
+
+Clusters usually pair a small quota'd home with a large scratch or project filesystem. The
+code is tiny; the output is not (~1.5 MB per cell), so **clone somewhere with room** —
+`/projects/$USER`, `/work/$USER`, whatever yours provides — rather than home:
 
 ```bash
-git clone https://github.com/gschliss/first_passage_simulation.git
+cd /projects/$USER            # or /work/$USER, /scratch/$USER ...
+git clone git@github.com:gschliss/first_passage_simulation.git
 cd first_passage_simulation
 ```
 
-Then either conda:
+The repo is **private**, so the clone needs your GitHub credentials. Check which mechanism
+this cluster has and use the matching URL:
+
+```bash
+ssh -T git@github.com                  # SSH key  -> "Hi gschliss! You've successfully authenticated"
+gh auth status                         # gh CLI   -> then: gh repo clone gschliss/first_passage_simulation
+git config --get credential.helper     # stored token -> the https:// URL works directly
+```
+
+If scratch is purged on a schedule, keep the clone on a persistent filesystem and point only
+the output at scratch:
+
+```bash
+mkdir -p /scratch/$USER/fpsim_results
+rm -rf results && ln -s /scratch/$USER/fpsim_results results
+```
+
+`git status` will then show `results/.gitkeep` as deleted and `results` as an untracked
+symlink. That is harmless — nothing in the code cares — but don't commit it.
+
+## 2. Build the environment
+
+Either conda:
 
 ```bash
 conda env create -f environment.yml
@@ -33,10 +60,17 @@ conda activate fpsim
 or a venv against a Python ≥ 3.9 module:
 
 ```bash
-module load python/3.11            # whatever your cluster calls it
+module avail python                # see what this cluster actually has
+module load python/3.11
 python -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+source .venv/bin/activate
+pip install -e ".[dev]"
 ```
+
+**No compiler or `module load gcc` is needed.** On x86_64 and aarch64 Linux every dependency
+(numpy, scipy, numba/llvmlite, pyarrow, matplotlib, pandas) installs from a binary wheel. If
+pip starts building something from source you are on an unusual architecture or an old pip —
+try `pip install --upgrade pip` first.
 
 ```bash
 mkdir -p slurm/logs                # SLURM will not create this, and jobs fail without it
@@ -45,7 +79,19 @@ mkdir -p slurm/logs                # SLURM will not create this, and jobs fail w
 Edit the two placeholder blocks in `slurm/submit_matrix.sh`: the partition/account `#SBATCH`
 lines, and the environment activation line.
 
-## 2. Check the install before spending an allocation
+## 3. Check the install before spending an allocation
+
+Three steps, cheapest first.
+
+```bash
+python scripts/check_env.py
+```
+
+Reports the Python version, every dependency and its version, whether `fpsim` imports, how
+many cores the process may *really* use (cgroups on a cluster often cut this well below
+`nproc`), whether Numba compiles and runs a parallel kernel, and whether the results
+filesystem supports the hard link `jobs.write_once` needs. Exits non-zero on any FAIL. Run it
+again inside a job — a login node and a compute node can differ on all of those.
 
 ```bash
 NUMBA_NUM_THREADS=8 python -m pytest -q        # 73 tests, ~15 s after Numba compiles
@@ -65,7 +111,7 @@ Results do not depend on the thread count: each molecule draws from its own seed
 was checked bit-for-bit across 6 and 8 threads (L89). `--cpus-per-task` is therefore free to
 differ from the 8 used locally.
 
-## 3. Look at the plan
+## 4. Look at the plan
 
 ```bash
 python scripts/sweep.py --plan matrix_d05 --list
@@ -89,7 +135,7 @@ to run a matrix:
 you a single dependency-free array, and the whole matrix lands in the time of its slowest cell
 (~25 min for this plan). The two-stage path exists for when core-hours are the scarce thing.
 
-## 4. Submit
+## 5. Submit
 
 Simple path:
 
@@ -122,7 +168,7 @@ python scripts/sweep.py --plan matrix_d05 --stage all --list | tail -n +2 | wc -
 ls -d results/dimension/*_d05/paired_ratios.csv | wc -l     # how many finished
 ```
 
-## 5. Collect the results
+## 6. Collect the results
 
 ```bash
 bash scripts/make_figures.sh        # writes docs/figures/, prints a cell count per figure
@@ -138,7 +184,7 @@ rsync -av --info=progress2 cluster:first_passage_simulation/results/dimension/ r
 Output is small: ~1.5 MB per cell (40 Parquet chunks plus the per-run figure), 154 MB for the
 whole 87-cell matrix.
 
-## 6. Growing the sweep
+## 7. Growing the sweep
 
 Edit `PLANS` at the top of `scripts/sweep.py`. A plan is `common` (flags every cell gets) plus
 `blocks`, and each block is a cross product of axis values. Cells that come out identical
@@ -199,7 +245,7 @@ Pass it through `sweep.py` with `--extra`:
 python scripts/sweep.py --stage all --array-task 7 --extra --shard 0/4
 ```
 
-## 7. Cluster-specific gotchas
+## 8. Cluster-specific gotchas
 
 The model gotchas are in `docs/handoff.md` §5 and still apply. These are the ones that only
 show up on a cluster:
@@ -221,7 +267,7 @@ show up on a cluster:
 - **`validate_3d_capture.py` step 4 is broken**: it hardcodes a run directory deleted in L91.
   Use `--skip-lattice` until it is repointed.
 
-## 8. The older per-config array path
+## 9. The older per-config array path
 
 `slurm/submit_sweep.sh` and `scripts/run.py` predate the paired design. They run one *chunk*
 per array task from a config file's own `sweeps:` block, writing to `results/runs/<name>/`, and
