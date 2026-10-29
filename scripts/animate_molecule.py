@@ -32,7 +32,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from scipy.ndimage import uniform_filter1d
 
 from fpsim.config import Geometry
 from fpsim.lattice import make_cluster
@@ -42,7 +41,6 @@ import vizstyle as vz
 BOUND, FREE = vz.SWITCH, vz.REFERENCE
 TRAIL = 260          # frames of bright trail behind the molecule
 HOLD_S = 2.5         # seconds held on the capture frame at the end
-EASE = (0.06, 0.55)  # fraction of the movie over which the zoom happens
 
 
 def sphere_segments(centre, r, n_lon, n_lat, pts=49):
@@ -79,7 +77,7 @@ def main():
     p.add_argument("--frames", type=int, default=900, help="target frame count (the path is subsampled)")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--dpi", type=int, default=150)
-    p.add_argument("--spin", type=float, default=-60.0,
+    p.add_argument("--spin", type=float, default=120.0,
                    help="degrees of azimuth drift over the movie; sign sets the direction")
     p.add_argument("--context", type=float, default=2.2,
                    help="draw neighbouring cells within this many lattice spacings of the path")
@@ -88,8 +86,11 @@ def main():
                    help="great-circle skeletons, translucent shaded spheres, or spheres while the "
                         "shot is wide fading to skeletons as it pushes in (the default)")
     p.add_argument("--alpha", type=float, default=0.13, help="--cells surface: opacity of a cell")
-    p.add_argument("--no-face", dest="face", action="store_false",
-                   help="orbit at a fixed rate instead of keeping the molecule on the near side")
+    p.add_argument("--azim0", type=float, default=None,
+                   help="starting azimuth; the default solves for the one that keeps the molecule "
+                        "on the camera side of its cell for the most frames")
+    p.add_argument("--ease", choices=("linear", "smooth"), default="linear",
+                   help="linear holds a constant rate throughout; smooth eases in and out")
     args = p.parse_args()
 
     base = args.trajectory.parent / args.trajectory.name.removesuffix(".npy").removesuffix(".json")
@@ -133,12 +134,14 @@ def main():
         ctx = [s for c in near for s in sphere_segments(centres[c], radius, 3, 1)]
         vis = [s for c in visited if c != final_cell for s in sphere_segments(centres[c], radius, 6, 3)]
         tgt = sphere_segments(centres[final_cell], radius, 8, 5)
-        for segments, colour, lw in ((ctx, "#ebebe7", 0.45), (vis, "#dcdcd8", 0.5),
-                                     (tgt, "#a6a69f", 0.7)):
+        # The distant cells end up *behind* the close view, where their skeletons are only
+        # clutter, so they fade to a fraction of the focus cells' strength.
+        for segments, colour, lw, peak in ((ctx, "#ebebe7", 0.45, 0.3), (vis, "#dcdcd8", 0.5, 1.0),
+                                           (tgt, "#a6a69f", 0.7, 1.0)):
             if segments:
                 lc = Line3DCollection(segments, colors=colour, linewidths=lw, zorder=0)
                 ax.add_collection3d(lc)
-                skels.append(lc)
+                skels.append((lc, peak))
     tc = centres[final_cell]
     label = ax.text(tc[0], tc[1], tc[2] + radius * 1.14, "target cell (ring 2)",
                     ha="center", fontsize=9.5, color=vz.SECONDARY, zorder=8)
@@ -191,19 +194,39 @@ def main():
 
     hold = int(HOLD_S * args.fps)
     n = len(f) + hold
-    # The camera follows a heavily smoothed position; the raw walk is far too jittery to track.
-    look = uniform_filter1d(xyz, max(5, len(f) // 6), axis=0, mode="nearest")
     wide_span = args.context * g.spacing + radius
     wide_at = centres[near].mean(0) if len(near) else hub
+    land_at = xyz[-1]                       # the shot dollies to the capture point
 
-    # Which side of its cell the molecule is on. It is bound ~90% of the time, so a fixed
-    # orbit spends much of the movie with the cell body between the molecule and the camera.
-    # Steering the azimuth to the outward normal keeps it on the near side; `--spin` is then
-    # an extra drift on top, so the field still turns.
+    # Every camera channel is a monotonic function of the frame, so the move never reverses:
+    # the azimuth is exactly linear, the elevation linear, and the span *geometric*, which is
+    # a constant relative zoom rate and therefore reads as a steady push-in. An earlier version
+    # steered the azimuth to the molecule's outward normal to keep it visible, which worked
+    # (93% of frames) but inherited the walk's wander and looked jerky (L106). Instead the one
+    # free parameter, the starting azimuth, is solved for below.
+    frac = np.arange(n) / n
+    ease = frac if args.ease == "linear" else smoothstep(frac)
+    span_of = wide_span * (args.narrow / wide_span) ** ease
+    mid_of = wide_at * (1 - ease)[:, None] + land_at * ease[:, None]
+    elev_of = 26 - 10 * ease
+
+    def score(azim0):
+        """Fraction of frames with the molecule on the camera's side of its own cell."""
+        a, e = np.radians(azim0 + args.spin * frac[:m]), np.radians(elev_of[:m])
+        cam = np.column_stack([np.cos(e) * np.cos(a), np.cos(e) * np.sin(a), np.sin(e)])
+        return float(((nrm * cam).sum(1) > 0).mean())
+
+    m = len(f)
     on_cell = np.where(np.isfinite(f[:, 4]), f[:, 4], 0).astype(int)
     outward = xyz - centres[on_cell]
-    phi = np.unwrap(np.arctan2(outward[:, 1], outward[:, 0]))
-    face = np.degrees(uniform_filter1d(phi, max(5, len(f) // 8), mode="nearest"))
+    nrm = outward / np.linalg.norm(outward, axis=1, keepdims=True)
+    in_frame = (np.abs(xyz - mid_of[:m]) <= span_of[:m, None]).all(1)
+    if args.azim0 is None:
+        cands = [a for a in range(0, 360, 5)]
+        args.azim0 = max(cands, key=score)
+    print(f"  azimuth {args.azim0:g}° -> {args.azim0 + args.spin:g}° ({args.spin:+g}°), "
+          f"molecule on the camera side in {100 * score(args.azim0):.0f}% of frames; "
+          f"in frame {100 * in_frame.mean():.0f}%")
 
     def segs(a):
         return np.stack([a[:-1], a[1:]], axis=1) if len(a) > 1 else np.empty((0, 2, 3))
@@ -227,9 +250,7 @@ def main():
             cap.set_sizes([300])
             clock.set_text(f"t = {row['t_end']:7.1f} s   captured")
 
-        u = smoothstep((k / n - EASE[0]) / (EASE[1] - EASE[0]))
-        span = wide_span + (args.narrow - wide_span) * u
-        mid = wide_at * (1 - u) + look[i] * u
+        u, span, mid = ease[k], span_of[k], mid_of[k]
         ax.set_xlim(mid[0] - span, mid[0] + span)
         ax.set_ylim(mid[1] - span, mid[1] + span)
         ax.set_zlim(mid[2] - span, mid[2] + span)
@@ -238,11 +259,9 @@ def main():
             fade = smoothstep(u / 0.55)
             for a in surfs:
                 a.set_alpha(args.alpha * (1 - fade))
-            for lc in skels:
-                lc.set_alpha(fade)
-        elev = 28 - 12 * u
-        azim = (face[i] if args.face else -60.0) + args.spin * k / n
-        ax.view_init(elev=elev, azim=azim)
+            for lc, peak in skels:
+                lc.set_alpha(fade * peak)
+        ax.view_init(elev=elev_of[k], azim=args.azim0 + args.spin * frac[k])
         return ()
 
     out = args.out or Path("results/figures") / f"{base.name}.mp4"
@@ -258,7 +277,7 @@ def main():
                                                 "-pix_fmt", "yuv420p"])
     anim.save(out, writer=writer, dpi=args.dpi)
     print(f"Saved {out}  ({n} frames, {n / args.fps:.0f} s, {step}x subsampled from {len(traj)}; "
-          f"{len(near)} context cells, spin {args.spin:g}°)")
+          f"{len(near)} context cells)")
 
 
 if __name__ == "__main__":

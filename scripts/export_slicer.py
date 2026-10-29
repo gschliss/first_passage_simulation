@@ -11,9 +11,8 @@ Files, each a separate Slicer model node so colour and opacity can be set indepe
 
     <name>_trajectory.vtk    the path as one polyline, with per-point scalars
                              time_s, state (0 free / 1 bound) and cell_id
-    <name>_cells.vtk         neighbouring cells, scalar `ring`
-    <name>_cells_target.vtk  cells of the target ring
-    <name>_cell_capture.vtk  the single cell the molecule was captured on
+    cells/cell_NNN_ringR*.vtk  one file per cell, so each is its own Slicer model node;
+                               the suffix marks _capture, _visited or _target
     <name>_markers.mrk.json  start and capture points as labelled fiducials
 
 Units: the model is in micrometres, and Slicer will read those numbers as millimetres. That
@@ -123,19 +122,26 @@ def main():
 
     near = np.flatnonzero(np.linalg.norm(cl.centers - xyz.mean(0), axis=1) <= args.context * g.spacing)
     capture = int(row["final_cell"])
-    ring = cl.ring
-    groups = {
-        f"{base.name}_cells.vtk": [c for c in near if ring[c] != g.target_ring],
-        f"{base.name}_cells_target.vtk": [c for c in near if ring[c] == g.target_ring and c != capture],
-        f"{base.name}_cell_capture.vtk": [capture],
-    }
-    for name, cells in groups.items():
-        if not cells:
-            continue
-        pts, tris, sc = merge_spheres(cl.centers[cells], g.cell_radius, ring[cells],
-                                      args.facets, max(6, args.facets // 2))
-        write_polydata(out / name, pts, polys=tris, scalars={"ring": sc}, title=name)
-        print(f"  {name:48} {len(cells):4d} cells, {len(tris):6d} triangles")
+    ring, visited = cl.ring, {int(c) for c in traj[:, 4] if np.isfinite(c)}
+
+    # One file per cell, so each arrives in Slicer as its own model node: no segmenting, and
+    # colour, opacity and visibility are set per cell. The name carries ring and role so the
+    # node list sorts and reads usefully.
+    cells_dir = out / "cells"
+    cells_dir.mkdir(exist_ok=True)
+    n_phi = max(6, args.facets // 2)
+    for c in sorted(set(near) | visited | {capture}):
+        role = ("_capture" if c == capture else
+                "_visited" if c in visited else
+                "_target" if ring[c] == g.target_ring else "")
+        name = f"cell_{int(c):03d}_ring{int(ring[c])}{role}.vtk"
+        pts, tris = sphere_mesh(cl.centers[c], g.cell_radius, args.facets, n_phi)
+        write_polydata(cells_dir / name, pts, polys=tris,
+                       scalars={"ring": np.full(len(pts), ring[c])}, title=name)
+    counts = {r: int((ring[sorted(set(near) | visited | {capture})] == r).sum())
+              for r in sorted(set(ring[sorted(set(near) | visited | {capture})].tolist()))}
+    print(f"  cells/  {len(set(near) | visited | {capture})} files, one per cell "
+          f"(by ring: {counts}), {len(tris)} triangles each")
 
     markers = {
         "@schema": "https://raw.githubusercontent.com/Slicer/Slicer/main/Modules/Loadable/"
@@ -150,13 +156,17 @@ def main():
     (out / "README.txt").write_text(
         f"3D Slicer scene for molecule {scene['molecule']} of {scene['run']}\n"
         f"{'=' * 72}\n\n"
-        "Load: File > Add Data > choose this folder's .vtk files (and the .mrk.json).\n"
-        "Each .vtk becomes a Models node; set colour and opacity per node in the Models\n"
-        "module. A good starting point:\n\n"
-        "  _cells.vtk          grey,  opacity 0.15   (the crowd)\n"
-        "  _cells_target.vtk   blue,  opacity 0.25   (ring-2 cells: the goal)\n"
-        "  _cell_capture.vtk   green, opacity 0.35   (the cell it was caught on)\n"
-        "  _trajectory.vtk     scalar colouring, see below\n\n"
+        "Load: File > Add Data, tick 'Show Options' and add this folder plus cells/.\n"
+        "Every cell is its own .vtk, so each becomes a separate Models node -- nothing to\n"
+        "segment. File names carry the cell id, its ring, and a role suffix:\n\n"
+        "  cell_027_ring2_capture.vtk   the cell the molecule was captured on\n"
+        "  cell_003_ring1_visited.vtk   a cell the molecule was bound to at some point\n"
+        "  cell_041_ring2_target.vtk    a target-ring cell it never reached\n"
+        "  cell_112_ring3.vtk           bystander\n\n"
+        "Sorting the Models list by name groups them by cell id; searching the list for\n"
+        "'_capture', '_visited' or '_target' selects a role in one go, and you can set\n"
+        "colour and opacity on a multiple selection. A good starting point is bystanders\n"
+        "grey at opacity 0.15, _target blue at 0.25, _capture green at 0.35.\n\n"
         "Trajectory scalars (Models > Scalars > pick the array, then Visible):\n"
         "  time_s        seconds, 0 .. %.1f\n"
         "  state_bound   0 = free in the gaps, 1 = bound to a membrane\n"
