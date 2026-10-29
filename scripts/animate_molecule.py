@@ -57,6 +57,16 @@ def sphere_segments(centre, r, n_lon, n_lat, pts=49):
     return out
 
 
+def sphere_surface(ax, centre, r, color, alpha, n=18):
+    """Shaded translucent sphere. matplotlib has no true depth sorting, so at any alpha high
+    enough to read as a surface it will sometimes paint over the trajectory; keep it low."""
+    u, v = np.mgrid[0:2 * np.pi:n * 1j, 0:np.pi:(n // 2 + 1) * 1j]
+    return ax.plot_surface(centre[0] + r * np.cos(u) * np.sin(v),
+                           centre[1] + r * np.sin(u) * np.sin(v),
+                           centre[2] + r * np.cos(v),
+                           color=color, alpha=alpha, linewidth=0, shade=True, zorder=0)
+
+
 def smoothstep(x):
     x = np.clip(x, 0.0, 1.0)
     return x * x * (3 - 2 * x)
@@ -69,10 +79,17 @@ def main():
     p.add_argument("--frames", type=int, default=900, help="target frame count (the path is subsampled)")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--dpi", type=int, default=150)
-    p.add_argument("--spin", type=float, default=210.0, help="degrees of azimuth swept over the movie")
+    p.add_argument("--spin", type=float, default=-60.0,
+                   help="degrees of azimuth drift over the movie; sign sets the direction")
     p.add_argument("--context", type=float, default=2.2,
                    help="draw neighbouring cells within this many lattice spacings of the path")
     p.add_argument("--narrow", type=float, default=22.0, help="half-width (um) of the final close view")
+    p.add_argument("--cells", choices=("skeleton", "surface", "crossfade"), default="crossfade",
+                   help="great-circle skeletons, translucent shaded spheres, or spheres while the "
+                        "shot is wide fading to skeletons as it pushes in (the default)")
+    p.add_argument("--alpha", type=float, default=0.13, help="--cells surface: opacity of a cell")
+    p.add_argument("--no-face", dest="face", action="store_false",
+                   help="orbit at a fixed rate instead of keeping the molecule on the near side")
     args = p.parse_args()
 
     base = args.trajectory.parent / args.trajectory.name.removesuffix(".npy").removesuffix(".json")
@@ -104,14 +121,24 @@ def main():
     hub = xyz.mean(0)
     near = [i for i in np.flatnonzero(np.linalg.norm(centres - hub, axis=1) <= args.context * g.spacing)
             if i not in visited]
-    ctx = [s for c in near for s in sphere_segments(centres[c], radius, 3, 1)]
-    vis = [s for c in visited if c != final_cell for s in sphere_segments(centres[c], radius, 6, 3)]
-    tgt = sphere_segments(centres[final_cell], radius, 8, 5)
-    if ctx:
-        ax.add_collection3d(Line3DCollection(ctx, colors="#ebebe7", linewidths=0.45, zorder=0))
-    if vis:
-        ax.add_collection3d(Line3DCollection(vis, colors="#dcdcd8", linewidths=0.5, zorder=1))
-    ax.add_collection3d(Line3DCollection(tgt, colors="#a6a69f", linewidths=0.7, zorder=1))
+    # Surfaces read as packed tissue while the shot is wide, but matplotlib does not
+    # depth-sort them against lines and the close view sits *inside* the field, where they
+    # paint over the trajectory. So the default shows spheres wide and skeletons close.
+    surfs, skels = [], []
+    if args.cells in ("surface", "crossfade"):
+        surfs += [sphere_surface(ax, centres[c], radius, "#b9c4d2", args.alpha) for c in near]
+        surfs += [sphere_surface(ax, centres[c], radius, "#aab6c6",
+                                 args.alpha * (1.7 if c == final_cell else 1.3)) for c in visited]
+    if args.cells in ("skeleton", "crossfade"):
+        ctx = [s for c in near for s in sphere_segments(centres[c], radius, 3, 1)]
+        vis = [s for c in visited if c != final_cell for s in sphere_segments(centres[c], radius, 6, 3)]
+        tgt = sphere_segments(centres[final_cell], radius, 8, 5)
+        for segments, colour, lw in ((ctx, "#ebebe7", 0.45), (vis, "#dcdcd8", 0.5),
+                                     (tgt, "#a6a69f", 0.7)):
+            if segments:
+                lc = Line3DCollection(segments, colors=colour, linewidths=lw, zorder=0)
+                ax.add_collection3d(lc)
+                skels.append(lc)
     tc = centres[final_cell]
     label = ax.text(tc[0], tc[1], tc[2] + radius * 1.14, "target cell (ring 2)",
                     ha="center", fontsize=9.5, color=vz.SECONDARY, zorder=8)
@@ -169,6 +196,15 @@ def main():
     wide_span = args.context * g.spacing + radius
     wide_at = centres[near].mean(0) if len(near) else hub
 
+    # Which side of its cell the molecule is on. It is bound ~90% of the time, so a fixed
+    # orbit spends much of the movie with the cell body between the molecule and the camera.
+    # Steering the azimuth to the outward normal keeps it on the near side; `--spin` is then
+    # an extra drift on top, so the field still turns.
+    on_cell = np.where(np.isfinite(f[:, 4]), f[:, 4], 0).astype(int)
+    outward = xyz - centres[on_cell]
+    phi = np.unwrap(np.arctan2(outward[:, 1], outward[:, 0]))
+    face = np.degrees(uniform_filter1d(phi, max(5, len(f) // 8), mode="nearest"))
+
     def segs(a):
         return np.stack([a[:-1], a[1:]], axis=1) if len(a) > 1 else np.empty((0, 2, 3))
 
@@ -198,7 +234,15 @@ def main():
         ax.set_ylim(mid[1] - span, mid[1] + span)
         ax.set_zlim(mid[2] - span, mid[2] + span)
         label.set_alpha(float(u))          # unreadable while the field is wide
-        ax.view_init(elev=28 - 12 * u, azim=-60 + args.spin * k / n)
+        if args.cells == "crossfade":      # spheres while wide, skeletons once close
+            fade = smoothstep(u / 0.55)
+            for a in surfs:
+                a.set_alpha(args.alpha * (1 - fade))
+            for lc in skels:
+                lc.set_alpha(fade)
+        elev = 28 - 12 * u
+        azim = (face[i] if args.face else -60.0) + args.spin * k / n
+        ax.view_init(elev=elev, azim=azim)
         return ()
 
     out = args.out or Path("results/figures") / f"{base.name}.mp4"
@@ -207,7 +251,10 @@ def main():
     # Quality-targeted rather than bitrate-targeted: this is line art on white, which CRF
     # compresses far better than a fixed bitrate. yuv420p so it plays in browsers and QuickTime.
     writer = animation.FFMpegWriter(fps=args.fps, codec="libx264",
-                                    extra_args=["-crf", "24", "-preset", "slow",
+                                    # yuv420p needs even dimensions and figsize*dpi often is
+                                    # not (9x8.6 at dpi 95 gives 855x817), so pad by a pixel.
+                                    extra_args=["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:0xFCFCFB",
+                                                "-crf", "24", "-preset", "slow",
                                                 "-pix_fmt", "yuv420p"])
     anim.save(out, writer=writer, dpi=args.dpi)
     print(f"Saved {out}  ({n} frames, {n / args.fps:.0f} s, {step}x subsampled from {len(traj)}; "
