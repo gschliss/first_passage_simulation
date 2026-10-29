@@ -84,6 +84,18 @@ PLANS = {
                  receptors_per_cell=[1000]),
         ],
     ),
+    # The ring3_t2x dwell line at N = 5 (L103). The 100/600 s block comes first so its new
+    # reference is base task 0; the 1 s N = 5 cell is ring3_t2x's own base cell (already run).
+    "ring3_t2x_n5dwell": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="d05", n=400, layouts=20, dwells="1", t_max=40000),
+        blocks=[
+            dict(free_fraction=[BASE_FREE], finds=[5], target_ring=[3], receptors_per_cell=[1000],
+                 dwells=["100", "600"], t_max=200000),
+            dict(free_fraction=[BASE_FREE], finds=[5], target_ring=[3], receptors_per_cell=[1000],
+                 dwells=["1", "0.01", "0.1", "10"]),
+        ],
+    ),
 }
 
 
