@@ -27,11 +27,13 @@ code is tiny; the output is not (~1.5 MB per cell), so **clone somewhere with ro
 
 ```bash
 cd /projects/$USER            # or /work/$USER, /scratch/$USER ...
-git clone git@github.com:gschliss/first_passage_simulation.git
+git clone https://github.com/gschliss/first_passage_simulation.git
 cd first_passage_simulation
 ```
 
-The repo is **private**, so the clone needs credentials.
+The repo is **public** (made so on 2026-10-29), so that clone needs no credentials at all and
+nothing below is required to get started. Read on only if you want to **push** from the
+cluster, or if the repo is made private again.
 
 ### If the machine is already signed in to GitHub
 
@@ -45,10 +47,10 @@ git config --get credential.helper     # stored token -> the https:// URL works 
 
 ### If it is not signed in
 
-**Preferred: a read-only deploy key.** It is scoped to this one repository and revocable on
-its own, so a shared cluster never holds credentials for the rest of your account. The
-cluster only needs to *pull* — results come home by `rsync`, not through git — so read-only
-is enough.
+**Preferred: a deploy key.** It is scoped to this one repository and revocable on its own, so
+a shared cluster never holds credentials for the rest of your account. Leave it read-only if
+you only ever pull there — results come home by `rsync`, not through git — and tick "Allow
+write access" only if you intend to commit from the cluster.
 
 On the cluster:
 
@@ -63,8 +65,9 @@ machine and is acceptable here *because* the key is read-only and single-repo; n
 job scripts does network git, so a passphrase would only ever be prompting you interactively.
 
 Paste the printed public key at
-**github.com/gschliss/first_passage_simulation/settings/keys** → *Add deploy key*. Leave
-"Allow write access" unticked. Then tell SSH to use it, since it is not a default key name:
+**github.com/gschliss/first_passage_simulation/settings/keys** → *Add deploy key*, ticking
+"Allow write access" only if you need to push. Then tell SSH to use it, since it is not a
+default key name:
 
 ```bash
 cat >> ~/.ssh/config <<'EOF'
@@ -361,10 +364,14 @@ through the `sweep.py` path described above.
 Sherlock is SLURM, so everything above applies. These are the parts that differ, checked
 against Stanford Research Computing's own docs (October 2026).
 
-**`gh` is not there, so don't plan on `gh auth login`.** Use the read-only deploy key from §1;
-it needs only `ssh-keygen` and `git`, which are always present.
+**Cloning needs nothing**, since the repo is public: the `https://` URL in §1 works as-is.
+`gh` is not installed on Sherlock, and Sherlock has no SSH key for GitHub out of the box, so
+`gh auth login` and `git@github.com:` URLs both fail there (`Permission denied (publickey)`).
+Neither matters unless you want to push from the cluster, in which case use the deploy key
+from §1 — it needs only `ssh-keygen` and `git`, which are always present.
 
-If `ssh -T git@github.com` hangs or is refused, outbound port 22 is blocked. GitHub serves
+If you do set up SSH and `ssh -T git@github.com` hangs or is refused, outbound port 22 is
+blocked. GitHub serves
 SSH on 443 as well, which gets through:
 
 ```bash
@@ -392,7 +399,7 @@ So:
 
 ```bash
 cd $GROUP_HOME
-git clone git@github.com:gschliss/first_passage_simulation.git
+git clone https://github.com/gschliss/first_passage_simulation.git
 cd first_passage_simulation
 mkdir -p $SCRATCH/fpsim_results
 rm -rf results && ln -s $SCRATCH/fpsim_results results
