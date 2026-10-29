@@ -115,6 +115,14 @@ The 5%-free default sits just past the crossover. Note that the rightmost sensib
 comparison — 100% free — *is* the reference line, and switching at 50% free beats it
 3.6-fold.
 
+![t_20 vs fraction free, five finds](figures/line_free_fraction_N5.png)
+
+At five finds the switching walker is **unchanged at every free fraction** (5092 / 649 / 216 /
+114 / 95 s against 5092 / 644 / 211 / 104 / 84 s at one find) while the reference is 9.6×
+slower, so the entire change comes from the reference collapsing. The crossover therefore
+drops from between 1% and 5% free to **below 1%**: at 1% free the ratio is 0.23. Even at
+0.1% free, where switching loses 17-fold at one find, it loses only 1.8-fold at five.
+
 ### Bound dwell time
 
 ![t_20 vs bound dwell](figures/line_dwell.png)
@@ -124,6 +132,14 @@ flat from 10 ms to 10 s (197 → 236 s) and then degrades sharply: 398 s at 100 
 and 1104 s at 600 s. **Switching stops paying off between 10 s and 100 s of dwell.** Once
 a bound excursion lasts longer than the time it would take to diffuse to the target,
 the membrane stops being a staging area and becomes a trap.
+
+![t_20 vs bound dwell, five finds](figures/line_dwell_N5.png)
+
+At five finds that crossover **disappears**. The switching curve is again almost identical
+(200 / 220 / 216 / 239 / 411 / 1108 s against 197 / 217 / 211 / 236 / 398 / 1104 s), but the
+reference sits at 2869 s, so switching wins across the whole range — by 14× at 10 ms and
+still by 2.6× at a 600 s dwell. The dwell penalty is real and the same size at both
+efficiencies; what changes is that at five finds it never grows large enough to matter.
 
 ### Capture efficiency
 
@@ -181,9 +197,10 @@ steeply falling reference.
 
 ## Open questions this raises
 
-- The 10–100 s dwell crossover is bracketed by one decade. One or two intermediate
-  dwells would pin it down.
+- The 10–100 s dwell crossover at one find is bracketed by one decade. One or two
+  intermediate dwells would pin it down. (At five finds there is no crossover to pin.)
 - Density crossover at N = 5 is above 10 000 receptors/cell and was not reached.
-- Everything here is at 1 s dwell except the dwell line itself; the dwell × efficiency
-  interaction is unexplored, and the efficiency result suggests it is where the effect
-  lives.
+- The dwell × efficiency interaction now has its two ends (L109): the switching walker's
+  dwell response is the same at one find and at five, and only the reference moves. The
+  intermediate efficiencies N = 2 and N = 10 along the dwell axis are still unmeasured, as
+  is any efficiency dependence away from 5% free.

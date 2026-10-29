@@ -57,6 +57,9 @@ echo "== lines =="
 line "ls -d $D/lattice3d@(|_f+([0-9.]))_ring2_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
      free_fraction line_free_fraction.png \
      "t_20 vs fraction free  (3D, ring 2, $BASE, first passage)"
+line "ls -d $D/lattice3d@(|_f+([0-9.]))_finds5_ring2_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
+     free_fraction line_free_fraction_N5.png \
+     "t_20 vs fraction free  (3D, ring 2, $BASE, 5 finds)"
 line "ls -d $D/lattice3d_ring[1234]_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
      target_ring line_distance.png \
      "t_20 vs distance  (3D, 5% free, $BASE, first passage)"
@@ -73,6 +76,10 @@ line "ls -d $D/lattice3d_finds5_ring2_rec*_dw1000_paired20_ref0.5_d05 2>/dev/nul
 line "ls -d $D/lattice3d_ring2_rec1000_dw+([0-9.])@(|_tmax100000)_paired20_ref0.5_d05 2>/dev/null" \
      bound_dwell line_dwell.png \
      "t_20 vs bound dwell  (3D, ring 2, 5% free, 1000 receptors, first passage)"
+# N = 5 needs no t_max variants: nothing times out at the default (L109).
+line "ls -d $D/lattice3d_finds5_ring2_rec1000_dw+([0-9.])_paired20_ref0.5_d05 2>/dev/null" \
+     bound_dwell line_dwell_N5.png \
+     "t_20 vs bound dwell  (3D, ring 2, 5% free, 1000 receptors, 5 finds)"
 # 5% free only: the bare name is N = 1, the _findsN names are the rest. A plain
 # lattice3d*_ring2_... glob would sweep in every free fraction as well.
 line "ls -d $D/lattice3d@(|_finds+([0-9]))_ring2_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \

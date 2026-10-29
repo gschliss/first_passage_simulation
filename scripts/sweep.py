@@ -64,6 +64,12 @@ PLANS = {
                  dwells=["0.01", "0.1", "1", "10"]),
             dict(free_fraction=[BASE_FREE], finds=[1], target_ring=[2], receptors_per_cell=[1000],
                  dwells=["100", "600"], t_max=100000),
+            # Dwell cline at 5 finds. No t_max variants: L109 found nothing times out at the
+            # default, so the 100 s and 600 s points need no raised ceiling (the N = 1 line
+            # above uses one, which turned out to be unnecessary but is kept so its runs stay
+            # addressable by their existing config hashes).
+            dict(free_fraction=[BASE_FREE], finds=[5], target_ring=[2], receptors_per_cell=[1000],
+                 dwells=["0.01", "0.1", "1", "10", "100", "600"]),
             dict(free_fraction=[BASE_FREE], finds=[1, 2, 5, 10], target_ring=[2],
                  receptors_per_cell=[1000]),
         ],
