@@ -101,10 +101,16 @@ def main():
     axes = np.array([[fig.add_subplot(bottom[i, j]) for j in range(2)] for i in range(2)])
 
     ax = axes[0, 0]
-    for off, col, mk, color, label in ((0.97, "total", "o", BLUE, "total capture time"),
-                                       (1.03, "local", "D", INK, "local search (at a target cell)")):
+    series = [(0.97, "total", "o", BLUE, "total capture time (mean)"),
+              (1.03, "local", "D", INK, "local search (at a target cell)")]
+    if "t20" in paired:  # L92: does not condition on capture, so it is the headline where defined
+        series.append((1.0, "t20", "*", ORANGE, "t_20 (20% of all molecules captured)"))
+    for off, col, mk, color, label in series:
         ax.errorbar(dw * off, paired[col], yerr=[paired[col] - paired[f"{col}_lo"], paired[f"{col}_hi"] - paired[col]],
-                    fmt=mk + "-", color=color, ms=8, capsize=3, lw=1.5, label=label)
+                    fmt=mk + "-", color=color, ms=10 if mk == "*" else 8, capsize=3, lw=1.5, label=label)
+    if "captured_ref" in paired and (paired.t20.isna().any() or (paired.captured_ref < 0.5).any()):
+        ax.annotate("free-only capture: " + ", ".join(f"{v:.0%}" for v in paired.captured_ref),
+                    (0.5, 0.02), xycoords="axes fraction", ha="center", fontsize=8, color=MUTED)
     ax.axhline(1, color=MUTED, lw=1)
     ax.annotate("1 = no difference", (dw.max(), 1), xytext=(0, 5),
                 textcoords="offset points", ha="right", fontsize=8.5, color=MUTED)

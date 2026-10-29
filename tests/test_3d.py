@@ -150,9 +150,12 @@ def test_3d_escaped_nearest_ghost(small_run):
 
 
 def test_3d_unbinding_rate_exact_and_free_fraction():
+    # t_max is 50 s, not 5: free-trip lengths are heavy-tailed (L28), so the time-averaged free
+    # fraction converges to 5% from below and ~10^3 trips is not enough to sample the tail. At
+    # 5 s it reads 2.2%, at 50 s 5.0% (L93).
     cfg = load_config(CONFIGS / "lattice3d.yaml")
     i = cfg.find_point("dwell", bound_dwell=0.005)
-    m = simulate(cfg, i, n_molecules=100, t_max=5.0).molecules
+    m = simulate(cfg, i, n_molecules=100, t_max=50.0).molecules
     bound_time = m.t_end.sum() - m.time_free.sum()
     expected = bound_time / 0.005
     assert m.n_trips.sum() == pytest.approx(expected, rel=4 / np.sqrt(expected))

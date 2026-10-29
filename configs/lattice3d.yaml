@@ -21,7 +21,7 @@ membrane:
 
 stepping:
   mode: adaptive           # adaptive | fixed [L34]
-  distance_fraction: 0.125 # [L30, L37]
+  distance_fraction: 0.0625 # [L30, L37, L93: 0.125 left free capture at 2 nm ~16% low]
   max_rate_dt: 0.05        # [L30]
   dt_cap: 0.01             # s [L30]
   dt_fixed: null           # fixed mode: null = strictest limit per sweep point [L34]

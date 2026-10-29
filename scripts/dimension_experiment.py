@@ -27,6 +27,7 @@ import argparse
 import dataclasses
 import json
 import shutil
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -44,6 +45,16 @@ FREE_FRACTION = 0.05
 SIZES = (0.002, 0.010)  # µm capture radius
 REF_LABEL = "free-only, same D_eff"
 BLUE, ORANGE, INK, MUTED, GRID = "#2a78d6", "#eb6834", "#1f1f1f", "#6b6b6b", "#e6e6e6"
+
+
+def switch_sweep():
+    """The switching walker's sweep. At 100% free there is no bound state, so a declared dwell
+    would be contradictory (and divide by zero in Sweep.points): the walker is then free-only,
+    which makes it identical to a D = 0.5 reference and gives the ratio-of-1 control (L92).
+    """
+    if FREE_FRACTION == 1.0:
+        return Sweep("switch", free_fraction=1.0)
+    return Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS)
 
 
 def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, rearm=0.010):
@@ -64,7 +75,7 @@ def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, r
     if n_per_cell is not None:
         cfg = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, n_per_cell=n_per_cell))
         suffix += f"_rec{n_per_cell}"
-    return dataclasses.replace(cfg, name=cfg.name + suffix, sweeps=(Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS),
+    return dataclasses.replace(cfg, name=cfg.name + suffix, sweeps=(switch_sweep(),
                                             Sweep("free_unit", free_fraction=1.0, d_free=1.0)))
 
 
@@ -87,7 +98,7 @@ def experiment_config(cfg, d_ref, capture_radius):
     return dataclasses.replace(
         cfg, name=f"{cfg.name}_dim_a{capture_radius * 1e3:.0f}nm",
         receptors=dataclasses.replace(cfg.receptors, capture_radius=capture_radius),
-        sweeps=(Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS),
+        sweeps=(switch_sweep(),
                 Sweep("reference", free_fraction=1.0, d_free=tuple(float(d) for d in d_ref))))
 
 
@@ -106,37 +117,54 @@ def verify_reference(cfg, d_ref, out, n, t_max, short_lag, long_lag):
     return df
 
 
-def copy_switching(ecfg, src_dir, run_dir, layouts):
-    """Copy switching chunks from an earlier run (same switching points and layouts) and restamp
-    them with this run's config hash; the reference points differ, the switching ones do not."""
+def copy_points(ecfg, src_dir, run_dir, layouts, which):
+    """Copy one walker's finished chunks from an earlier run and restamp them with this run's
+    config hash. ``which`` is "switch" or "reference".
+
+    Switching chunks are shared by runs that differ only in the reference walker (L79).
+    Reference chunks are shared by runs that differ only in the switching walker: a free-only
+    walker never binds, so its trajectories do not depend on the free fraction or on the bound
+    dwell (L95 found them bit-identical across both). Molecule seeds depend on the sweep index,
+    so the source run must have the same number of dwell points; the asserts below check that
+    each copied chunk really is the point it is standing in for.
+    """
     run_dir.mkdir(parents=True, exist_ok=True)
     chash = config_hash(ecfg)
+    offset = 0 if which == "switch" else len(DWELLS)
+    points = ecfg.sweep_points(1.0)
     for i in range(len(DWELLS)):
         for c in range(layouts):
-            src, dst = stem_for(src_dir, Task(i, c)), stem_for(run_dir, Task(i, c))
+            src, dst = stem_for(src_dir, Task(offset + i, c)), stem_for(run_dir, Task(offset + i, c))
             if dst.with_suffix(".parquet").exists():
                 continue
             meta = json.loads(src.with_suffix(".json").read_text())
-            assert meta["sweep_point"]["sweep"] == "switch" and abs(meta["sweep_point"]["bound_dwell"] - DWELLS[i]) < 1e-12, meta
+            sp = meta["sweep_point"]
+            assert sp["sweep"] == which, f"expected a {which} chunk, got {sp['sweep']}: {src}"
+            if which == "switch":
+                assert abs(sp["bound_dwell"] - DWELLS[i]) < 1e-12, meta
+            else:
+                assert abs(sp["d_free"] - points[offset + i].d_free) < 1e-12, meta
             meta.update(config_hash=chash, copied_from=str(src))
             shutil.copy(src.with_suffix(".parquet"), dst.with_suffix(".parquet"))
             dst.with_suffix(".json").write_text(json.dumps(meta, indent=2))
 
 
-def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None):
+def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None, reuse_reference=None):
     """``layouts`` > 1: each point runs ``layouts`` chunks of n // layouts molecules, chunk c on
     shared receptor layout c, so switching and reference points see the same layouts (L57)."""
     dirs = {}
     for a in SIZES:
         ecfg = experiment_config(cfg, d_ref, a)
         run_dir = out / f"runs_a{a * 1e3:.0f}nm"
-        if reuse_switching is not None:
-            (run_dir).mkdir(parents=True, exist_ok=True)
+        for src, which in ((reuse_switching, "switch"), (reuse_reference, "reference")):
+            if src is None:
+                continue
+            run_dir.mkdir(parents=True, exist_ok=True)
             manifest = dict(config=ecfg.to_dict(), config_hash=config_hash(ecfg), n_sweep_points=ecfg.n_sweep_points,
                             sweep_labels=[p.label for p in ecfg.sweep_points(1.0)])
             if not (run_dir / "config.json").exists():
                 (run_dir / "config.json").write_text(json.dumps(manifest, indent=2, default=float))
-            copy_switching(ecfg, reuse_switching / f"runs_a{a * 1e3:.0f}nm", run_dir, layouts)
+            copy_points(ecfg, src / f"runs_a{a * 1e3:.0f}nm", run_dir, layouts, which)
         for i in range(ecfg.n_sweep_points):
             for c in range(layouts):
                 extra = {"layout_seed": c} if layouts > 1 else {}
@@ -146,27 +174,59 @@ def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None):
     return dirs
 
 
+def per_layout(m, idx):
+    """One row per layout (chunk) for sweep point ``idx``, holding everything the paired
+    bootstrap needs: capture-time sums over captured molecules, and ``n_all``, the layout's
+    full molecule count, which t_20 needs because escapes count as never arriving (L91)."""
+    a = m[m.sweep_index == idx]
+    c = a[a.outcome == "captured"]
+    chunks = np.sort(a.chunk.unique())
+    g = c.assign(local=c.t_end - c.t_first_target).groupby("chunk")
+    d = pd.DataFrame(index=chunks)
+    d["n_all"] = a.groupby("chunk").size().reindex(chunks).fillna(0)
+    d["n"] = g.size().reindex(chunks).fillna(0)
+    d["t_sum"] = g.t_end.sum().reindex(chunks).fillna(0.0)
+    d["l_sum"] = g.local.sum().reindex(chunks).fillna(0.0)
+    d["times"] = [c.t_end.to_numpy()[c.chunk.to_numpy() == ch] for ch in chunks]
+    return d
+
+
 def paired_ratios(m, n_boot=4000, seed=0):
-    """Switching / reference ratio of mean total and local-search time per switching point,
-    with 95% CIs from resampling layouts (chunks) jointly for both walkers (L57)."""
+    """Switching / reference ratios per switching point, with 95% CIs from resampling
+    layouts (chunks) jointly for both walkers (L57).
+
+    Reports the ratio of mean total and local-search time (captured molecules only, so these
+    condition on capture) and of t_20 (L91, which does not). Capture fractions are reported
+    as levels rather than a ratio, since they are the readout wherever t_20 is undefined.
+    """
     rng = np.random.default_rng(seed)
     rows = []
     for k, dwell in enumerate(DWELLS):
-        per = []
-        for idx in (k, len(DWELLS) + k):
-            c = m[(m.sweep_index == idx) & (m.outcome == "captured")]
-            g = c.assign(local=c.t_end - c.t_first_target).groupby("chunk")
-            per.append(pd.DataFrame({"t_sum": g.t_end.sum(), "l_sum": g.local.sum(), "n": g.size()}))
-        sw, rf = per
+        sw, rf = (per_layout(m, idx) for idx in (k, len(DWELLS) + k))
         layouts = sw.index.intersection(rf.index).to_numpy()
+
+        def stats(d, sel):
+            a = d.loc[sel]
+            n, n_all = a.n.sum(), a.n_all.sum()
+            times = np.concatenate(list(a.times)) if len(a) else np.array([])
+            return (a.t_sum.sum() / n if n else np.nan, a.l_sum.sum() / n if n else np.nan,
+                    quantile_time(times, n_all), n / n_all if n_all else np.nan)
+
         def ratio_of(sel):
-            a, b = sw.loc[sel], rf.loc[sel]
-            return (a.t_sum.sum() / a.n.sum()) / (b.t_sum.sum() / b.n.sum()), (a.l_sum.sum() / a.n.sum()) / (b.l_sum.sum() / b.n.sum())
+            (ts, ls, q_s, c_s), (tr, lr, q_r, c_r) = stats(sw, sel), stats(rf, sel)
+            return ts / tr, ls / lr, q_s / q_r, q_s, q_r, c_s, c_r
+
         est = ratio_of(layouts)
         boot = np.array([ratio_of(rng.choice(layouts, len(layouts))) for _ in range(n_boot)])
-        lo, hi = np.percentile(boot, [2.5, 97.5], axis=0)
-        rows.append(dict(bound_dwell=dwell, n_layouts=len(layouts), total=est[0], total_lo=lo[0], total_hi=hi[0],
-                         local=est[1], local_lo=lo[1], local_hi=hi[1]))
+        with warnings.catch_warnings():  # all-NaN columns when fewer than 20% are ever captured
+            warnings.simplefilter("ignore", RuntimeWarning)
+            lo, hi = np.nanpercentile(boot, [2.5, 97.5], axis=0)
+        rows.append(dict(bound_dwell=dwell, n_layouts=len(layouts),
+                         total=est[0], total_lo=lo[0], total_hi=hi[0],
+                         local=est[1], local_lo=lo[1], local_hi=hi[1],
+                         t20=est[2], t20_lo=lo[2], t20_hi=hi[2],
+                         t20_switch=est[3], t20_ref=est[4],
+                         captured_switch=est[5], captured_ref=est[6]))
     return pd.DataFrame(rows)
 
 
@@ -252,8 +312,10 @@ def plot(out, cal, check, s, molecules, title, size=None, t_min=100.0, paired=No
         if k == 0:
             ax.set_ylabel("fraction captured")
             ax.legend(fontsize=8, frameon=False, loc="upper left")
-        ax.set_title(f"bound {dwell * 1e3:.0f} ms, free {dwell * FREE_FRACTION / (1 - FREE_FRACTION) * 1e3:.2g} ms\n"
-                     f"D_eff = {sw.d_eff[k]:.2f} µm²/s (bands: 95% CI)", loc="left", fontsize=10)
+        states = ("free only (never binds)" if FREE_FRACTION == 1.0 else
+                  f"bound {dwell * 1e3:.0f} ms, free {dwell * FREE_FRACTION / (1 - FREE_FRACTION) * 1e3:.2g} ms")
+        d_eff_note = "" if not np.isfinite(sw.d_eff[k]) else f"\nD_eff = {sw.d_eff[k]:.2f} µm²/s"
+        ax.set_title(f"{states}{d_eff_note} (bands: 95% CI)", loc="left", fontsize=10)
         style(ax)
 
     x = np.arange(len(DWELLS))
@@ -343,6 +405,8 @@ def main():
     p.add_argument("--n", type=int, default=100)
     p.add_argument("--skip-calibration", action="store_true",
                    help="don't measure D_eff at all; requires --d-ref (L91)")
+    p.add_argument("--t-max", type=float, default=None,
+                   help="override run.t_max (s) for the capture runs; long dwells need a higher ceiling (L92)")
     p.add_argument("--cal-t-max", type=float, default=3000.0)
     p.add_argument("--short-lag", type=float, default=50.0)
     p.add_argument("--long-lag", type=float, default=500.0)
@@ -363,12 +427,18 @@ def main():
                    help="free-only reference at this fixed D (µm²/s) instead of matched D_eff (L79)")
     p.add_argument("--reuse-switching", type=Path, default=None,
                    help="copy switching chunks from this earlier run directory (same points, layouts, seeds)")
+    p.add_argument("--reuse-reference", type=Path, default=None,
+                   help="copy free-only reference chunks from this earlier run directory. Valid when the ring, "
+                        "receptor count, --finds, --d-ref, --layouts, --n and the number of dwells all match: the "
+                        "reference never binds, so it does not depend on the free fraction or the dwell (L95)")
     p.add_argument("--reuse-calibration", type=Path, default=None,
                    help="copy calibration CSVs from this run directory; valid because calibration runs have no "
                         "receptors and their own enlarged cluster, so they don't depend on targets or receptor count")
     args = p.parse_args()
     if args.skip_calibration and args.d_ref is None:
         p.error("--skip-calibration needs --d-ref: without a measured D_eff there is nothing to match")
+    if args.free_fraction == 1.0 and len(args.dwells.split(",")) != 1:
+        p.error("--free-fraction 1.0 has no bound state, so it is a single point: give one --dwells value")
 
     global SIZES, FREE_FRACTION, DWELLS, REF_LABEL
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
@@ -377,6 +447,9 @@ def main():
     cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free, args.finds, args.rearm)
     if args.dwells != "0.005,0.0707,0.285,1.0":
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
+    if args.t_max is not None:  # a different time limit is a different run, so it changes the hash and the name
+        cfg = dataclasses.replace(cfg, name=cfg.name + f"_tmax{args.t_max:g}",
+                                  run=dataclasses.replace(cfg.run, t_max=args.t_max))
     if args.layouts > 1:
         cfg = dataclasses.replace(cfg, name=cfg.name + f"_paired{args.layouts}")
     if args.d_ref is not None:
@@ -424,7 +497,7 @@ def main():
 
     if not args.replot:
         print("3. capture runs", flush=True)
-        capture_runs(cfg, d_ref, out, args.n, args.layouts, args.reuse_switching)
+        capture_runs(cfg, d_ref, out, args.n, args.layouts, args.reuse_switching, args.reuse_reference)
 
     s, molecules = summarize(out)
     s.to_csv(out / "summary.csv", index=False)
