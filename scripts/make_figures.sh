@@ -86,8 +86,9 @@ line "ls -d $D/lattice3d@(|_finds+([0-9]))_ring2_rec1000_dw1000_paired20_ref0.5_
      finds_to_capture line_efficiency.png \
      "t_20 vs capture efficiency  (3D, ring 2, 5% free, $BASE)"
 
-# A cartoon, not a result: a 2D/1D version of the mechanism, for talks (L110). It runs its
-# own toy walkers and reads nothing from results/, so it works on a bare checkout.
+# A cartoon, not a result: one molecule at a three-cell junction, for talks (L110-L112). It
+# runs its own toy walker and reads nothing from results/, so it works on a bare checkout.
+# The mp4 of the same walk is not regenerated here; it takes a minute. Add --animate for it.
 printf '%-34s ' "sketch_1d2d_search"
 $PY scripts/sketch_1d2d_search.py > /dev/null 2>&1 && echo "ok" || echo "FAILED"
 

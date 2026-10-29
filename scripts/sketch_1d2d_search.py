@@ -1,23 +1,22 @@
-"""Toy 2D cartoon of the search: slide on a membrane, hop the slit, find a receptor (L110/L111).
+"""One molecule at a three-cell junction: sliding in 1D, diffusing in 2D (L110-L112).
 
-Not a result — a teaching picture of the *mechanism* the project tests, drawn one
-dimension down so the whole search fits on a page. Three cells meet at a junction,
-with the project's own geometry (R = 10 um, 0.5 um gap). A molecule:
+Not a result — the simplest picture of the mechanism the project tests. Cells sit in
+the project's own geometry (R = 10 um, 0.5 um gap). A single molecule is drawn, and the
+only thing the colour means is which kind of walk it is doing:
 
-    bound    slides along one cell's membrane, a 1D walk on a circle
-    free     unbinds, diffuses in the gap in 2D, reflects off membranes
-    hop      rebinds to whichever membrane it reaches first — often a *different* cell,
-             which is only possible where cells come close, i.e. at the junction
-    capture  reaching a receptor patch while bound to the target cell
+    1D   bound, sliding along one cell's membrane
+    2D   free, diffusing in the gap until it meets a membrane again
 
-Free and bound use the same D (L96), so nothing here comes from one state being
-faster: the picture is entirely about where the molecule can go.
+Where it rebinds to a *different* cell, it has hopped — only possible where cells come
+close, which is why the junction is the interesting place to look. Free and bound use
+the same D (L96), so nothing here comes from one state being faster.
 
-    python scripts/sketch_1d2d_search.py --seed 3
+    python scripts/sketch_1d2d_search.py              # docs/figures/sketch_1d2d_search.{png,pdf}
+    python scripts/sketch_1d2d_search.py --animate    # and the mp4 of the same walk
 
-Writes docs/figures/sketch_1d2d_search.{png,pdf}. This figure carries no capture
-curves and no statistics on purpose — it is a mechanism cartoon, and the measured
-comparison lives in the report's own capture-curve figures.
+The still and the movie are rendered from one trajectory, so they cannot disagree.
+There are no receptors and no capture here: it is a picture of how the molecule moves,
+and every measured comparison lives in the report's own capture curves.
 """
 
 from __future__ import annotations
@@ -28,6 +27,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import animation
 from matplotlib.collections import LineCollection
 from matplotlib.patches import Circle
 from numba import njit
@@ -42,20 +42,17 @@ SPACING = 2 * R + GAP
 D = 0.5                       # um^2/s, free and bound alike (L96)
 DELTA = 0.05                  # binding layer, um (thicker than the model's 10 nm, to stay drawable)
 DT = 1e-4
-TARGET_CELL = 2               # receptors live on this cell only, as in the real runs
-JUNCTION = (0, 1, 2)          # centre cell and two neighbours: the trio the zoom panel shows
-N_PATCH = 12                  # receptor patches on the target cell
-PATCH_ARC = 0.25              # um of membrane per patch
+
+C_1D, C_2D = vz.SWITCH, vz.REFERENCE   # the only two colours in the figure
 
 # A 7-cell patch, not a bare trio: with only three cells a molecule that unbinds on an
 # outer face diffuses off into vacuum, which is not what the gap looks like in a packed
-# lattice. Cells 0, 1, 2 are the junction the zoom panel is centred on.
-_ANG = np.arange(6) * np.pi / 3
-CENTERS = np.vstack([[0.0, 0.0],
-                     SPACING * np.column_stack([np.cos(_ANG + np.pi / 3), np.sin(_ANG + np.pi / 3)])])
-CENTERS = np.ascontiguousarray(CENTERS[[0, 1, 2, 3, 4, 5, 6]])
+# lattice. Cells 0, 1, 2 are the junction the view is centred on.
+_ANG = np.arange(6) * np.pi / 3 + np.pi / 3
+CENTERS = np.ascontiguousarray(np.vstack([[0.0, 0.0],
+                                          SPACING * np.column_stack([np.cos(_ANG), np.sin(_ANG)])]))
+JUNCTION = (0, 1, 2)
 JUNCTION_XY = CENTERS[list(JUNCTION)].mean(axis=0)
-PATCH_THETA = np.linspace(0, 2 * np.pi, N_PATCH, endpoint=False) + 0.21
 
 
 @njit(cache=True)
@@ -69,32 +66,26 @@ def _nearest(x, y, centers):
 
 
 @njit(cache=True)
-def _on_patch(theta, patches, half_ang):
-    for k in range(patches.shape[0]):
-        d = abs(((theta - patches[k] + np.pi) % (2 * np.pi)) - np.pi)
-        if d < half_ang:
-            return True
-    return False
+def walk(seed, centers, dwell, k_layer, t_max, start_cell, start_theta, stride, rec, hop_xy, hop_t):
+    """Record (x, y, bound, cell) every `stride` steps for t_max seconds.
 
-
-@njit(cache=True)
-def walk(seed, centers, patches, dwell, k_layer, t_max, start_cell, start_theta, rec_stride, rec):
-    """One molecule to capture or t_max. Fills `rec` with (x, y, bound, cell) every
-    `rec_stride` steps. Returns (t_capture, frames recorded, hops, steps bound)."""
+    Hops are written out as they happen, with the frame they fall in. Recomputing them
+    from `rec` afterwards does not work: a hop can start and finish between two recorded
+    frames, so the subsampled record shows a cell change with no free interval and the
+    count comes out wrong.
+    """
     np.random.seed(seed)
     sd = np.sqrt(2 * D * DT)
     p_off = 1.0 - np.exp(-DT / dwell)
     p_on = 1.0 - np.exp(-k_layer * DT)
-    half_ang = (PATCH_ARC / 2) / R
 
     cell, theta, bound = start_cell, start_theta, True
     x = centers[cell, 0] + R * np.cos(theta)
     y = centers[cell, 1] + R * np.sin(theta)
-    n, hops, n_bound, frames = int(t_max / DT), 0, 0, 0
+    frames, hops = 0, 0
 
-    for i in range(n):
+    for i in range(int(t_max / DT)):
         if bound:
-            n_bound += 1
             if np.random.random() < p_off:
                 bound = False
                 depth = R + np.random.random() * DELTA
@@ -115,7 +106,9 @@ def walk(seed, centers, patches, dwell, k_layer, t_max, start_cell, start_theta,
                 x, y = cx + (x - cx) * s, cy + (y - cy) * s
                 near, d = _nearest(x, y, centers)
             if d <= DELTA and np.random.random() < p_on:
-                if near != cell:
+                if near != cell and hops < hop_xy.shape[0]:
+                    hop_xy[hops, 0], hop_xy[hops, 1] = x, y
+                    hop_t[hops] = frames
                     hops += 1
                 cell = near
                 theta = np.arctan2(y - centers[cell, 1], x - centers[cell, 0])
@@ -123,135 +116,148 @@ def walk(seed, centers, patches, dwell, k_layer, t_max, start_cell, start_theta,
                 y = centers[cell, 1] + R * np.sin(theta)
                 bound = True
 
-        if i % rec_stride == 0 and frames < rec.shape[0]:
+        if i % stride == 0 and frames < rec.shape[0]:
             rec[frames, 0], rec[frames, 1] = x, y
             rec[frames, 2] = 1.0 if bound else 0.0
             rec[frames, 3] = cell
             frames += 1
-        if bound and cell == TARGET_CELL and _on_patch(theta, patches, half_ang):
-            if frames < rec.shape[0]:
-                rec[frames, 0], rec[frames, 1] = x, y
-                rec[frames, 2], rec[frames, 3] = 1.0, cell
-                frames += 1
-            return i * DT, frames, hops, n_bound
-    return np.inf, frames, hops, n_bound
+    return frames, hops
 
 
-def run(seed, *, dwell, k_layer, t_max, start_cell, start_theta, stride):
+def run(seed, *, dwell, k_layer, t_max, stride):
+    """One walk, started bound on cell 1 facing the junction."""
     rec = np.full((int(t_max / DT / stride) + 8, 4), np.nan)
-    t, frames, hops, n_bound = walk(seed, CENTERS, PATCH_THETA, dwell, k_layer, t_max,
-                                    start_cell, start_theta, stride, rec)
-    return t, rec[:frames], hops, n_bound * DT
+    hop_xy, hop_t = np.zeros((4096, 2)), np.zeros(4096, dtype=np.int64)
+    theta = np.arctan2(*(JUNCTION_XY - CENTERS[1])[::-1])
+    frames, hops = walk(seed, CENTERS, dwell, k_layer, t_max, 1, theta, stride,
+                        rec, hop_xy, hop_t)
+    return rec[:frames], hop_xy[:hops], hop_t[:hops]
 
 
-def patch_arcs(cell):
-    """Polyline for each receptor patch on `cell`, for drawing."""
-    out = []
-    for th in PATCH_THETA:
-        a = np.linspace(th - (PATCH_ARC / 2) / R, th + (PATCH_ARC / 2) / R, 8)
-        out.append(np.column_stack([CENTERS[cell, 0] + R * np.cos(a),
-                                    CENTERS[cell, 1] + R * np.sin(a)]))
-    return out
-
-
-def draw_scene(ax, paths, caught, colours, *, centre, half, label, show_labels):
+def draw_cells(ax, half):
     for i, c in enumerate(CENTERS):
         inj = i in JUNCTION
-        ax.add_patch(Circle(c, R, facecolor="#eceae6" if inj else "#f4f3f0",
-                            edgecolor=vz.SECONDARY if inj else vz.GRID,
-                            lw=1.6 if inj else 1.2, zorder=1))
-        if show_labels and inj:
-            ax.text(*c, "target cell\n(receptors)" if i == TARGET_CELL else "cell",
-                    ha="center", va="center", fontsize=9.5, color=vz.MUTED, zorder=2)
-    # Above the paths: the receptors are what the whole picture is about, and a slide
-    # line drawn over them hides the only thing the molecule is looking for.
-    ax.add_collection(LineCollection(patch_arcs(TARGET_CELL), colors="#1f9d55",
-                                     linewidths=5.5, zorder=8))
-
-    for path, colour, hit in zip(paths, colours, caught):
-        xy, bound = path[:, :2], path[:-1, 2] > 0.5
-        seg = np.stack([xy[:-1], xy[1:]], axis=1)
-        # Thin while free in the gap, thick while sliding: the two motions read apart
-        # at a glance, which is the whole point of the picture.
-        ax.add_collection(LineCollection(seg[~bound], colors=colour, linewidths=0.9,
-                                         alpha=0.75, zorder=5))
-        ax.add_collection(LineCollection(seg[bound], colors=colour, linewidths=3.2,
-                                         alpha=0.95, zorder=6))
-        # A ring wherever the molecule arrives on a cell it was not on before.
-        cell = path[:, 3]
-        jump = np.flatnonzero((path[1:, 2] > 0.5) & (path[:-1, 2] < 0.5) & (cell[1:] != cell[:-1])) + 1
-        ax.plot(xy[jump, 0], xy[jump, 1], "o", mfc="none", mec=colour, mew=1.8, ms=11, zorder=7)
-        ax.plot(*xy[0], "o", color=vz.SURFACE, mec=colour, mew=2.2, ms=9, zorder=8)
-        if hit:  # only a molecule that actually reached a receptor gets the find marker
-            ax.plot(*xy[-1], "o", color="#1f9d55", mec=vz.SURFACE, mew=1.6, ms=11, zorder=9)
-
-    ax.set_xlim(centre[0] - half, centre[0] + half)
-    ax.set_ylim(centre[1] - half, centre[1] + half)
+        ax.add_patch(Circle(c, R, facecolor="#eeece8" if inj else "#f5f4f1",
+                            edgecolor=vz.MUTED if inj else vz.GRID, lw=1.4, zorder=1))
+    ax.set_xlim(JUNCTION_XY[0] - half, JUNCTION_XY[0] + half)
+    ax.set_ylim(JUNCTION_XY[1] - half, JUNCTION_XY[1] + half)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(label, loc="left", fontsize=11.5, color=vz.INK, pad=8)
+
+
+def state_segments(path):
+    """Segments split by state, so each is drawn in its own colour and weight."""
+    xy = path[:, :2]
+    seg = np.stack([xy[:-1], xy[1:]], axis=1)
+    bound = path[:-1, 2] > 0.5
+    return seg[bound], seg[~bound]
+
+
+def legend(ax, loc="upper left"):
+    h = [plt.Line2D([], [], color=C_1D, lw=3.4), plt.Line2D([], [], color=C_2D, lw=1.7),
+         plt.Line2D([], [], marker="o", mfc="none", mec=vz.INK, mew=1.6, ms=11, ls="")]
+    ax.legend(h, ["1D: sliding on a membrane", "2D: free in the gap", "lands on a different cell"],
+              loc=loc, fontsize=10.5, borderaxespad=1.0)
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--seeds", type=int, nargs="+", default=[43, 30, 2], help="one molecule per seed")
+    p.add_argument("--seed", type=int, default=2)
     p.add_argument("--dwell", type=float, default=1.0, help="mean bound dwell, s")
     p.add_argument("--k-layer", type=float, default=900.0, help="binding rate inside the layer, 1/s")
-    p.add_argument("--t-max", type=float, default=300.0)
-    p.add_argument("--stride", type=int, default=60, help="steps per recorded frame")
-    p.add_argument("--zoom", type=float, default=9.0, help="half-width of the junction panel, um")
+    p.add_argument("--t-max", type=float, default=90.0, help="seconds of the walk to show")
+    p.add_argument("--stride", type=int, default=100, help="steps per recorded frame")
+    p.add_argument("--half", type=float, default=21.5, help="half-width of the view, um")
+    p.add_argument("--animate", action="store_true", help="also write the mp4 of the same walk")
+    p.add_argument("--fps", type=int, default=30)
+    p.add_argument("--seconds", type=float, default=18.0, help="length of the movie")
+    p.add_argument("--dpi", type=int, default=110)
     p.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "figures" / "sketch_1d2d_search.png")
     args = p.parse_args()
     vz.use()
 
-    start_cell, start_theta = 1, np.arctan2(*(JUNCTION_XY - CENTERS[1])[::-1])
-    paths, caught, info = [], [], []
-    for s_ in args.seeds:
-        t, path, hops, t_bound = run(s_, dwell=args.dwell, k_layer=args.k_layer, t_max=args.t_max,
-                                     start_cell=start_cell, start_theta=start_theta, stride=args.stride)
-        paths.append(path)
-        caught.append(bool(np.isfinite(t)))
-        info.append((s_, t, hops, t_bound / (t if np.isfinite(t) else args.t_max)))
-        print(f"  seed {s_:3d}  t={t:8.1f} s  hops={hops:3d}  bound {info[-1][3]:.0%}  frames={len(path)}")
+    path, hop_xy, hop_t = run(args.seed, dwell=args.dwell, k_layer=args.k_layer,
+                              t_max=args.t_max, stride=args.stride)
+    hops = len(hop_xy)
+    bound_frac = (path[:, 2] > 0.5).mean()
+    print(f"seed {args.seed}: {args.t_max:g} s, {hops} hops, {1 - bound_frac:.0%} of the time free, "
+          f"{len(path)} frames")
 
-    colours = [vz.SWITCH, vz.REFERENCE, "#7b5cd6"][: len(paths)]
-    fig, axes = plt.subplots(1, 2, figsize=(13.4, 7.4), gridspec_kw=dict(wspace=0.04))
-    fig.subplots_adjust(top=0.92, bottom=0.17)
-    draw_scene(axes[0], paths, caught, colours, centre=JUNCTION_XY, half=SPACING + 8.0,
-               show_labels=True, label="Seven cells, packed: the molecule never leaves the gaps")
-    z = args.zoom
-    draw_scene(axes[1], paths, caught, colours, centre=JUNCTION_XY, half=z, show_labels=False,
-               label=f"The three-cell junction, {2 * z:.0f} um across")
-    axes[0].add_patch(plt.Rectangle((JUNCTION_XY[0] - z, JUNCTION_XY[1] - z), 2 * z, 2 * z,
-                                    fill=False, lw=1.1, ec=vz.MUTED, ls=(0, (4, 3)), zorder=10))
+    fig, ax = plt.subplots(figsize=(8.2, 8.6))
+    draw_cells(ax, args.half)
+    slide, free = state_segments(path)
+    ax.add_collection(LineCollection(free, colors=C_2D, linewidths=1.7, alpha=0.95, zorder=4))
+    ax.add_collection(LineCollection(slide, colors=C_1D, linewidths=3.4, alpha=0.95, zorder=5))
+    ax.plot(hop_xy[:, 0], hop_xy[:, 1], "o", mfc="none", mec=vz.INK, mew=1.6, ms=11, zorder=7)
+    ax.plot(*path[0, :2], "o", color=vz.SURFACE, mec=vz.INK, mew=1.8, ms=8, zorder=8)
+    legend(ax)
 
-    h = [plt.Line2D([], [], color=vz.MUTED, lw=3.2), plt.Line2D([], [], color=vz.MUTED, lw=0.9),
-         plt.Line2D([], [], marker="o", mfc="none", mec=vz.MUTED, mew=1.8, ms=11, ls=""),
-         plt.Line2D([], [], marker="o", color="#1f9d55", mec=vz.SURFACE, ms=11, ls="")]
-    fig.legend(h, ["sliding on a membrane (1D)", "free in the gap (2D)",
-                   "lands on a different cell", "finds a receptor"],
-               loc="lower center", bbox_to_anchor=(0.5, 0.075), ncol=4, fontsize=10)
-
-    fig.suptitle("Where the search happens: sliding along a cell, then hopping the slit to the next",
-                 fontsize=13, x=0.085, ha="left", y=0.965)
-    found = ", ".join(f"{t:.0f} s after {hops} hops" for _, t, hops, _ in info if np.isfinite(t))
-    missed = sum(1 for _, t, _, _ in info if not np.isfinite(t))
-    caption = (
-        f"R = {R:g} um cells, {GAP:g} um gap, D = {D:g} um^2/s free and bound, mean dwell "
-        f"{args.dwell:g} s, about {100 - 100 * np.mean([b for *_, b in info]):.0f}% of the time "
-        f"free. {len(paths)} molecules, all started bound at the same point on the lower cell of "
-        f"the junction; receptors on one cell only. Found a receptor {found}"
-        + (f"; {missed} still searching at {args.t_max:.0f} s. " if missed else ". ")
-        + "Over 150 molecules the median find is 109 s (quartiles 60 and 265 s) with 2 hops, and "
-          "29% have not found one by 1500 s; these three were picked from the first 90 seeds as "
-          "paths that both hop and find quickly enough to stay legible. Cartoon only: 2D, and no "
-          "statistics - the measured comparison is in the report's capture curves.")
-    # Wrapped by hand: one long line would stretch the tight bounding box far past the axes.
-    fig.text(0.085, 0.045, textwrap.fill(caption, 118), ha="left", va="top",
-             fontsize=9.5, color=vz.SECONDARY)
+    ax.set_title("One molecule at a three-cell junction", loc="left", fontsize=13,
+                 color=vz.INK, pad=10)
+    fig.text(0.02, 0.055, textwrap.fill(
+        f"{args.t_max:g} s of a single walk. R = {R:g} um cells, {GAP:g} um gap, "
+        f"D = {D:g} um^2/s in both states, mean dwell {args.dwell:g} s; "
+        f"{1 - bound_frac:.0%} of the time free, {hops} hops between cells. "
+        "Cartoon: 2D, and nothing is being measured here.", 92),
+        ha="left", va="top", fontsize=10, color=vz.SECONDARY)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.12)
 
     for q in vz.save(fig, args.out):
         print(f"Saved {q}")
+    plt.close(fig)
+
+    if args.animate:
+        animate(path, hop_xy, hop_t, args)
+
+
+def animate(path, hop_xy, hop_t, args):
+    """The same walk, played out: the trail grows and changes colour with the state."""
+    n = max(1, int(args.fps * args.seconds))
+    step = max(1, len(path) // n)
+    idx = list(range(1, len(path), step))
+    n = len(idx)
+
+    fig, ax = plt.subplots(figsize=(8.2, 8.6))
+    draw_cells(ax, args.half)
+    free_lc = LineCollection([], colors=C_2D, linewidths=1.7, alpha=0.95, zorder=4)
+    slide_lc = LineCollection([], colors=C_1D, linewidths=3.4, alpha=0.95, zorder=5)
+    ax.add_collection(free_lc)
+    ax.add_collection(slide_lc)
+    hops_plot, = ax.plot([], [], "o", mfc="none", mec=vz.INK, mew=1.6, ms=11, zorder=7)
+    head, = ax.plot([], [], "o", mec=vz.SURFACE, mew=1.6, ms=13, zorder=9)
+    # Opposite corner from the legend, which lives at the upper left.
+    clock = ax.text(0.98, 0.98, "", transform=ax.transAxes, va="top", ha="right",
+                    fontsize=12.5, color=vz.INK)
+    legend(ax)
+    ax.set_title("One molecule at a three-cell junction", loc="left", fontsize=13,
+                 color=vz.INK, pad=10)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.04)
+
+    def update(k):
+        j = idx[k]
+        slide, free = state_segments(path[: j + 1])
+        slide_lc.set_segments(list(slide))
+        free_lc.set_segments(list(free))
+        shown = hop_xy[hop_t <= j]
+        hops_plot.set_data(shown[:, 0], shown[:, 1])
+        bound = path[j, 2] > 0.5
+        head.set_data([path[j, 0]], [path[j, 1]])
+        head.set_color(C_1D if bound else C_2D)
+        clock.set_text(f"{j * args.stride * DT:.1f} s of {args.t_max:g}\n"
+                       f"{'1D: sliding' if bound else '2D: free in the gap'}")
+        return ()
+
+    out = args.out.parent / (args.out.stem + ".mp4")
+    anim = animation.FuncAnimation(fig, update, frames=n, interval=1000 / args.fps, blit=False)
+    # CRF rather than a bitrate: line art on a flat background compresses far better that
+    # way. yuv420p needs even dimensions, which figsize*dpi often is not, hence the pad.
+    writer = animation.FFMpegWriter(fps=args.fps, codec="libx264",
+                                    extra_args=["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:0xFCFCFB",
+                                                "-crf", "24", "-preset", "slow",
+                                                "-pix_fmt", "yuv420p"])
+    anim.save(out, writer=writer, dpi=args.dpi)
+    print(f"Saved {out}  ({n} frames, {n / args.fps:.0f} s of video for "
+          f"{args.t_max:g} s of walk, {step}x subsampled)")
 
 
 if __name__ == "__main__":
