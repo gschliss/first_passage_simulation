@@ -150,7 +150,11 @@ pip install -e ".[dev]"
 **No compiler or `module load gcc` is needed.** On x86_64 and aarch64 Linux every dependency
 (numpy, scipy, numba/llvmlite, pyarrow, matplotlib, pandas) installs from a binary wheel. If
 pip starts building something from source you are on an unusual architecture or an old pip —
-try `pip install --upgrade pip` first.
+try `pip install --upgrade pip` first. **Or you are on an old glibc** (CentOS/RHEL 7, glibc 2.17 —
+Sherlock is one): the newest numpy ships only `manylinux_2_28` wheels, so pip falls back to a
+source build that fails. `pip install --prefer-binary -e ".[dev]"` picks the newest release
+that has a wheel for your glibc instead (numpy 2.2.6 on Sherlock, 2026-10). Check with
+`ldd --version`.
 
 ```bash
 mkdir -p slurm/logs                # SLURM will not create this, and jobs fail without it
@@ -413,10 +417,14 @@ ml python/3.12.1
 python3 -m venv .venv       # note python3: plain `python` is an old system interpreter
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -e ".[dev]"
+pip install --prefer-binary -e ".[dev]"   # glibc 2.17 here: see §2
+export NUMBA_NUM_THREADS=4  # match -c above, or check_env.py warns about oversubscription
 python scripts/check_env.py
 python -m pytest -q
 ```
+
+Sherlock's system git is 1.8, too old for `git -C`; `fpsim.io.git_commit` and `check_env.py`
+use `cwd=` instead, so chunk metadata gets the commit without `ml git`.
 
 Once the venv is activated, plain `python` is the right one, which is why the commands
 elsewhere in this file work unchanged from there.

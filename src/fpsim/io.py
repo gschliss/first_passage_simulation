@@ -17,9 +17,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def git_commit() -> str | None:
     try:
-        out = subprocess.run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=PROJECT_ROOT,
                              capture_output=True, text=True, timeout=5)
-        dirty = subprocess.run(["git", "-C", str(PROJECT_ROOT), "status", "--porcelain", "--untracked-files=no"],
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=PROJECT_ROOT,
                                capture_output=True, text=True, timeout=5).stdout.strip()
         return out.stdout.strip() + ("-dirty" if dirty else "") if out.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):

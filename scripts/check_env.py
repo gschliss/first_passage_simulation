@@ -145,7 +145,7 @@ def check_tmpdir():
 
 def check_git():
     try:
-        out = subprocess.run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=PROJECT_ROOT,
                              capture_output=True, text=True, timeout=30)
         record("PASS" if out.returncode == 0 else "WARN", "git commit",
                out.stdout.strip() or "not a git checkout (chunk metadata will say 'unknown')")
