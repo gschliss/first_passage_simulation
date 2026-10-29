@@ -9,6 +9,7 @@ cd "$(dirname "$0")/.."
 PY=.venv/bin/python
 D=results/dimension
 F=docs/figures/ring3
+EXT=${EXT:-png}   # EXT=pdf bash scripts/make_figures_ring3.sh for vector copies
 mkdir -p "$F"
 
 # Run dirs are lattice3d[_f<pct>][_finds<N>]_ring<R>_rec<n>_dw<ms>[_tmax<t>]_paired<L>_ref0.5_d05,
@@ -19,7 +20,7 @@ pick() { A=(); while IFS= read -r d; do [ -f "$d/paired_ratios.csv" ] && A+=("$d
 
 grid() {  # grid <listing> <x> <y> <out> <title>
   pick "$1"
-  printf '%-34s %2d cells  ' "$(basename "$4" .png)" "${#A[@]}"
+  printf '%-34s %2d cells  ' "$(basename "$4" ".$EXT")" "${#A[@]}"
   if [ "${#A[@]}" -lt 2 ]; then echo "(skipped)"; return; fi
   $PY scripts/plot_grid.py "${A[@]}" --x "$2" --y "$3" --out "$F/$4" --title "$5" > /dev/null 2>&1 \
     && echo "ok" || echo "FAILED"
@@ -27,7 +28,7 @@ grid() {  # grid <listing> <x> <y> <out> <title>
 
 line() {  # line <listing> <x> <out> <title>
   pick "$1"
-  printf '%-34s %2d points ' "$(basename "$3" .png)" "${#A[@]}"
+  printf '%-34s %2d points ' "$(basename "$3" ".$EXT")" "${#A[@]}"
   if [ "${#A[@]}" -lt 2 ]; then echo "(skipped)"; return; fi
   $PY scripts/plot_line.py "${A[@]}" --x "$2" --out "$F/$3" --title "$4" > /dev/null 2>&1 \
     && echo "ok" || echo "FAILED"
@@ -37,28 +38,28 @@ BASE="1 s dwell"
 R="ring 3, t_max x2"
 echo "== grids =="
 grid "ls -d $D/lattice3d@(|_f+([0-9.]))_ring3_rec*_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     n_per_cell free_fraction grid_free_x_density_N1.png \
+     n_per_cell free_fraction grid_free_x_density_N1.$EXT \
      "t_20 across fraction free x receptor density  (3D, $R, $BASE, first passage)"
 grid "ls -d $D/lattice3d@(|_f+([0-9.]))_finds5_ring3_rec*_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     n_per_cell free_fraction grid_free_x_density_N5.png \
+     n_per_cell free_fraction grid_free_x_density_N5.$EXT \
      "t_20 across fraction free x receptor density  (3D, $R, $BASE, 5 finds)"
 
 echo "== lines =="
 line "ls -d $D/lattice3d@(|_f+([0-9.]))_ring3_rec1000_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     free_fraction line_free_fraction.png "t_20 vs fraction free  (3D, $R, $BASE, 1000 receptors, first passage)"
+     free_fraction line_free_fraction.$EXT "t_20 vs fraction free  (3D, $R, $BASE, 1000 receptors, first passage)"
 line "ls -d $D/lattice3d@(|_f+([0-9.]))_finds5_ring3_rec1000_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     free_fraction line_free_fraction_N5.png "t_20 vs fraction free  (3D, $R, $BASE, 1000 receptors, 5 finds)"
+     free_fraction line_free_fraction_N5.$EXT "t_20 vs fraction free  (3D, $R, $BASE, 1000 receptors, 5 finds)"
 line "ls -d $D/lattice3d_ring3_rec*_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     n_per_cell line_density.png "t_20 vs receptor density  (3D, $R, 5% free, $BASE, first passage)"
+     n_per_cell line_density.$EXT "t_20 vs receptor density  (3D, $R, 5% free, $BASE, first passage)"
 line "ls -d $D/lattice3d_finds5_ring3_rec*_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     n_per_cell line_density_N5.png "t_20 vs receptor density  (3D, $R, 5% free, $BASE, 5 finds)"
+     n_per_cell line_density_N5.$EXT "t_20 vs receptor density  (3D, $R, 5% free, $BASE, 5 finds)"
 # The dwell line spans two t_max settings (40 000 s; 200 000 s for 100 s and 600 s dwells).
 line "ls -d $D/lattice3d_ring3_rec1000_dw+([0-9.])_tmax@(40000|200000)_paired20_ref0.5_d05 2>/dev/null" \
-     bound_dwell line_dwell.png "t_20 vs bound dwell  (3D, $R, 5% free, 1000 receptors, first passage)"
+     bound_dwell line_dwell.$EXT "t_20 vs bound dwell  (3D, $R, 5% free, 1000 receptors, first passage)"
 line "ls -d $D/lattice3d_finds5_ring3_rec1000_dw+([0-9.])_tmax@(40000|200000)_paired20_ref0.5_d05 2>/dev/null" \
-     bound_dwell line_dwell_N5.png "t_20 vs bound dwell  (3D, $R, 5% free, 1000 receptors, 5 finds)"
+     bound_dwell line_dwell_N5.$EXT "t_20 vs bound dwell  (3D, $R, 5% free, 1000 receptors, 5 finds)"
 line "ls -d $D/lattice3d@(|_finds+([0-9]))_ring3_rec1000_dw1000_tmax40000_paired20_ref0.5_d05 2>/dev/null" \
-     finds_to_capture line_efficiency.png "t_20 vs capture efficiency  (3D, $R, 5% free, $BASE, 1000 receptors)"
+     finds_to_capture line_efficiency.$EXT "t_20 vs capture efficiency  (3D, $R, 5% free, $BASE, 1000 receptors)"
 
 echo
 echo "ring-3 cells complete: $(ls -d $D/*ring3*d05*/ 2>/dev/null | while read -r d; do [ -f "$d/paired_ratios.csv" ] && echo x; done | wc -l | tr -d ' ')"
