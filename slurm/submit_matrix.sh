@@ -13,8 +13,8 @@
 #SBATCH --time=06:00:00
 #SBATCH --output=slurm/logs/%x_%A_%a.out
 # --- Edit for your cluster (placeholders; uncomment as needed) ---
-##SBATCH --partition=YOUR_PARTITION
-##SBATCH --account=YOUR_ACCOUNT
+#SBATCH --partition=normal
+# (Sherlock has no --account)
 
 set -euo pipefail
 
@@ -23,9 +23,9 @@ STAGE=${2:?stage: base, rest or all}
 shift 2
 
 # --- Edit: activate the project environment ---
-# module load python/3.11
+ml python/3.12.1
 # source ~/miniconda3/etc/profile.d/conda.sh && conda activate fpsim
-# source .venv/bin/activate
+source .venv/bin/activate
 
 # Numba uses exactly the cores SLURM gave this task. Results do not depend on the thread
 # count (one RNG seed per molecule), so this is free to differ from the 8 used locally (L89).
