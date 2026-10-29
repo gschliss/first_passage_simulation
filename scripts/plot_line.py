@@ -155,9 +155,7 @@ def main():
     ax.margins(x=0.12)
     vz.style(ax)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=200, bbox_inches="tight")
-    print(f"Saved {args.out}")
+    print("Saved " + ", ".join(str(q) for q in vz.save(fig, args.out)))
 
 
 if __name__ == "__main__":

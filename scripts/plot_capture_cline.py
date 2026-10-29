@@ -126,9 +126,8 @@ def main():
              "molecules still searching at t_max never arrive. A curve that plateaus below 0.20 "
              "has no t_20.", ha="left", fontsize=9.5, color=vz.SECONDARY)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=200, bbox_inches="tight")
-    print(f"Saved {args.out}  ({len(rows)} points"
+    vz.save(fig, args.out)
+    print(f"Saved {args.out} (+ .pdf)  ({len(rows)} points"
           + (", reference identical across the cline" if ref_same else "") + ")")
 
 

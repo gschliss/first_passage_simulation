@@ -63,7 +63,12 @@ def load(dirs, x, y):
 
 def panel(ax, piv, cap, title, norm, x, y, show_y):
     v = piv.to_numpy(dtype=float)
-    ax.imshow(np.ma.masked_invalid(v), cmap=vz.SEQ, norm=norm, origin="lower", aspect="auto")
+    # pcolormesh, not imshow: imshow embeds the cells as a raster image in the PDF, where
+    # Illustrator cannot touch them, while a quad mesh stays vector (L108). Masked cells are
+    # simply not drawn, so the axes background stands in for SEQ's "bad" colour.
+    ax.set_facecolor("#f0efec")
+    ax.pcolormesh(np.arange(v.shape[1] + 1) - 0.5, np.arange(v.shape[0] + 1) - 0.5,
+                  np.ma.masked_invalid(v), cmap=vz.SEQ, norm=norm, shading="flat")
     for i in range(v.shape[0]):
         for j in range(v.shape[1]):
             if np.isfinite(v[i, j]):
@@ -132,9 +137,7 @@ def main():
 
     if args.title:
         fig.suptitle(args.title, fontsize=12, x=0.125, ha="left", y=1.0)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=200, bbox_inches="tight")
-    print(f"Saved {args.out}")
+    print("Saved " + ", ".join(str(q) for q in vz.save(fig, args.out)))
 
 
 if __name__ == "__main__":
