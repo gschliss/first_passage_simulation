@@ -92,6 +92,28 @@ PLANS = {
     ),
     # The ring3_t2x dwell line at N = 5 (L115). The 100/600 s block comes first so its new
     # reference is base task 0; the 1 s N = 5 cell is ring3_t2x's own base cell (already run).
+    # Receptors on every cell but the source, 5 finds, arrivals read at rings 1-3 of a ring-3-sized
+    # cluster (L117-L118). The switching walker almost never passes ring 1 (pilot: 0 of 1200 reached
+    # ring 3) while the free-only one is ~200x costlier per molecule, so the two arms are sampled
+    # separately: allrec_n5 runs only switching chunks (--arm switch) at 1 000 000 molecules over 200
+    # layouts; allrec_n5_ref is two complete small cells that supply the reference, one per t_max.
+    "allrec_n5": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="d05", n=1000000, layouts=200, dwells="1", t_max=40000, finds=5,
+                    target_ring=3, receptors_per_cell=1000, receptors_on="all"),
+        blocks=[
+            dict(free_fraction=FREES),
+            dict(free_fraction=[BASE_FREE], dwells=["0.01", "0.1", "1", "10"]),
+            dict(free_fraction=[BASE_FREE], dwells=["100", "600"], t_max=200000),
+        ],
+    ),
+    "allrec_n5_ref": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="d05", n=4000, layouts=20, dwells="1", t_max=40000, finds=5,
+                    target_ring=3, receptors_per_cell=1000, receptors_on="all",
+                    free_fraction=BASE_FREE),
+        blocks=[dict(dwells=["1"]), dict(dwells=["100"], t_max=200000)],
+    ),
     "ring3_t2x_n5dwell": dict(
         common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
                     tag="d05", n=400, layouts=20, dwells="1", t_max=40000),
@@ -183,6 +205,11 @@ def main():
     p.add_argument("--pack", type=int, default=1,
                    help="one array task runs G consecutive tasks in turn, so short tasks add up to a "
                         "worthwhile job (L114)")
+    p.add_argument("--arm", default="both", choices=("both", "switch"),
+                   help="switch: run only the switching walker's chunks, one task per chunk (L118). "
+                        "Valid for single-dwell cells; the reference comes from elsewhere")
+    p.add_argument("--chunks", default=None, metavar="A:B",
+                   help="with --arm switch, only chunks (layouts) A..B-1")
     p.add_argument("--replot", action="store_true",
                    help="summarise and plot each cell of the stage from the chunks on disk (no shards)")
     p.add_argument("--extra", nargs=argparse.REMAINDER, default=[],
@@ -198,8 +225,23 @@ def main():
     else:
         tasks = [(c, None) for c in cells]
 
-    m = 1 if args.replot else max(args.shards, 1)
-    tasks = [(cell, base, k) for cell, base in tasks for k in range(m)]
+    if args.arm == "switch":
+        # A single-dwell cell has 2 sweep points, so its chunks enumerate as j = point * layouts
+        # + layout and the switching ones are j < layouts. Shard j/(2 * layouts) is exactly chunk j.
+        if args.replot or args.shards != 1:
+            p.error("--arm switch picks its own shards; don't combine it with --shards or --replot")
+        expanded = []
+        for cell, base in tasks:
+            if len(str(cell.get("dwells", "")).split(",")) != 1:
+                p.error("--arm switch needs single-dwell cells")
+            L = int(cell["layouts"])
+            a, b = (int(v) for v in args.chunks.split(":")) if args.chunks else (0, L)
+            expanded += [(cell, base, k, 2 * L) for k in range(max(a, 0), min(b, L))]
+        tasks = expanded
+        m = None
+    else:
+        m = 1 if args.replot else max(args.shards, 1)
+        tasks = [(cell, base, k, m) for cell, base in tasks for k in range(m)]
     g = max(args.pack, 1)
     n_jobs = -(-len(tasks) // g)
 
@@ -209,8 +251,8 @@ def main():
     if args.list:
         print(f"plan {args.plan}: {len(cells)} cells, {len(bases)} reuse groups "
               f"-> stage {args.stage} has {len(tasks)} tasks in {n_jobs} array tasks")
-        for i, (cell, base, k) in enumerate(tasks):
-            print(f"{i:4d}  {label(cell)}" + (f"  shard {k}/{m}" if m > 1 else "")
+        for i, (cell, base, k, mk) in enumerate(tasks):
+            print(f"{i:4d}  {label(cell)}" + (f"  shard {k}/{mk}" if mk > 1 else "")
                   + (f"   [reuses {label(base)}]" if base else ""))
         return
     if args.array_task is None:
@@ -220,16 +262,16 @@ def main():
 
     failed = 0
     for t in range(args.array_task * g, min((args.array_task + 1) * g, len(tasks))):
-        cell, base, k = tasks[t]
+        cell, base, k, mk = tasks[t]
         cmd = [sys.executable, str(DRIVER), *flags(cell)]
         if base is not None:
             cmd += ["--reuse-reference", out_dir(base)]
         if args.replot:
             cmd += ["--replot"]
-        elif m > 1:
-            cmd += ["--shard", f"{k}/{m}"]
+        elif mk > 1:
+            cmd += ["--shard", f"{k}/{mk}"]
         cmd += args.extra
-        print(f"task {t}/{len(tasks)}: {label(cell)}" + (f"  shard {k}/{m}" if m > 1 else ""), flush=True)
+        print(f"task {t}/{len(tasks)}: {label(cell)}" + (f"  shard {k}/{mk}" if mk > 1 else ""), flush=True)
         print(" ".join(cmd), flush=True)
         if not args.dry_run:
             failed += subprocess.run(cmd, cwd=PROJECT_ROOT).returncode != 0

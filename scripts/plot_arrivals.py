@@ -10,7 +10,8 @@ levels off at that ring's share, so the curves for rings 1, 2 and 3 plus escapes
 timeouts add up to 1 at t_max. No t_20 is read off (L117): the whole curve is the result.
 
 Top three rows: rings 1, 2 and 3, switching on the left and the free-only reference on the
-right, one curve per cline point (light = low axis value). Bottom row: where every molecule
+right, one curve per cline point (light = low axis value). The two panels of a row have
+separate y scales (switching shares beyond ring 1 can be orders of magnitude smaller). Bottom row: where every molecule
 ended up. The reference never binds, so along a free-fraction or dwell cline it is one run
 repeated; that is detected and drawn once. Also writes <out>.csv with the counts behind
 every curve.
@@ -37,7 +38,9 @@ RINGS = (1, 2, 3)
 FATES = ["ring 1", "ring 2", "ring 3", "ring 4+", "escaped", "still searching"]
 
 
-def collect(dirs, x):
+def collect(dirs, x, refs=None):
+    """``refs``: {t_max: reference arm} used where a run has no reference chunks of its own
+    (switching-only runs, L118)."""
     rows = []
     for d in dirs:
         cfgs = sorted(d.glob("runs_*/config.json"))
@@ -56,6 +59,12 @@ def collect(dirs, x):
             row = {"x": xv, "run": d.name}
             for role, idx in (("switch", i), ("reference", k + i)):
                 a = mol[(mol["sweep"] == role) & (mol.sweep_index == idx)]
+                if a.empty and role == "reference" and refs:
+                    t_max = cfg["run"]["t_max"]
+                    if t_max not in refs:
+                        raise SystemExit(f"{d.name}: no --reference-runs entry with t_max {t_max:g}")
+                    row[role] = refs[t_max]
+                    continue
                 if a.empty:
                     break
                 cap = a.outcome == "captured"
@@ -98,11 +107,18 @@ def main():
     p.add_argument("--x", required=True, choices=("free_fraction", "bound_dwell"))
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--title", default="")
+    p.add_argument("--reference-runs", type=Path, nargs="+", default=[],
+                   help="complete runs whose free-only arm stands in for runs that have none, matched "
+                        "by t_max (L118)")
     p.add_argument("--t-min", type=float, default=10.0, help="left edge of the log time axis (s)")
     args = p.parse_args()
 
     vz.use()
-    rows = collect(args.run_dirs, args.x)
+    refs = {}
+    for d in args.reference_runs:
+        r = collect([d], "free_fraction")[0]
+        refs[json.loads(sorted(d.glob("runs_*/config.json"))[0].read_text())["config"]["run"]["t_max"]] = r["reference"]
+    rows = collect(args.run_dirs, args.x, refs)
     if not rows:
         raise SystemExit("no usable runs found")
     table(rows).to_csv(args.out.with_suffix(".csv"), index=False)
@@ -114,8 +130,9 @@ def main():
     fig = plt.figure(figsize=(12.4, 14.0))
     gs = fig.add_gridspec(4, 2, height_ratios=[1, 1, 1, 0.9], hspace=0.42, wspace=0.08)
     for row_i, k in enumerate(RINGS):
+        t0 = min(args.t_min, 0.1) if k == 1 else args.t_min  # ring 1 fills within seconds
         axes = [fig.add_subplot(gs[row_i, 0]), None]
-        axes[1] = fig.add_subplot(gs[row_i, 1], sharey=axes[0], sharex=axes[0])
+        axes[1] = fig.add_subplot(gs[row_i, 1], sharex=axes[0])  # own y: switching ring-3 shares can be ~1e-5
         for ax, role, name in ((axes[0], "switch", "Switching"),
                                (axes[1], "reference", "Non-switching (free-only, D = 0.5)")):
             drawn = rows[:1] if (role == "reference" and ref_same) else rows
@@ -124,10 +141,10 @@ def main():
                 t = np.sort(m["t"][m["ring"] == k])
                 y = np.arange(1, len(t) + 1) / m["n"]
                 lab = (vz.AXIS_TICK[args.x](r["x"]) if len(drawn) > 1 else "every point (identical)")
-                ax.step(np.r_[args.t_min, t], np.r_[0, y], where="post", color=colour, lw=1.9,
+                ax.step(np.r_[t0, t], np.r_[0, y], where="post", color=colour, lw=1.9,
                         label=f"{lab}  ({len(t)})")
             ax.set_xscale("log")
-            ax.set_xlim(args.t_min, t_hi * 1.2)
+            ax.set_xlim(t0, t_hi * 1.2)
             ax.set_title(f"{name}: arrivals at ring {k}", loc="left", fontsize=11, color=vz.INK, pad=6)
             vz.style(ax)
             ax.legend(loc="upper left", fontsize=8.5, title=vz.AXIS_LABEL[args.x] + "  (count)",
@@ -135,8 +152,8 @@ def main():
             if row_i == len(RINGS) - 1:
                 ax.set_xlabel("time (s)")
         axes[0].set_ylabel(f"fraction of all molecules\nabsorbed at ring {k}")
-        axes[0].set_ylim(bottom=0)
-        plt.setp(axes[1].get_yticklabels(), visible=False)
+        for a in axes:
+            a.set_ylim(bottom=0)
 
     # Where every molecule ended up: one stacked bar per point and walker.
     ax = fig.add_subplot(gs[3, :])
