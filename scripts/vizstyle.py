@@ -41,7 +41,28 @@ def use():
         "axes.grid": False, "legend.frameon": False,
         "xtick.direction": "out", "ytick.direction": "out",
         "lines.linewidth": 2, "lines.markersize": 8,
+        # Type 42 (TrueType) instead of matplotlib's default Type 3: Illustrator cannot edit
+        # Type 3 text, it arrives as uneditable glyph outlines (L108).
+        "pdf.fonttype": 42, "ps.fonttype": 42,
     })
+
+
+def save(fig, path, dpi=200):
+    """Write the figure as both PNG and PDF.
+
+    The PNG is what the Markdown report embeds; the PDF is the vector copy for Illustrator.
+    One render, two writes, so the pair can never disagree.
+    """
+    import pathlib as _pl
+
+    path = _pl.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = []
+    for suffix in (".png", ".pdf"):
+        q = path.with_suffix(suffix) if path.suffix in (".png", ".pdf") else _pl.Path(str(path) + suffix)
+        fig.savefig(q, dpi=dpi, bbox_inches="tight")
+        out.append(q)
+    return out
 
 
 def style(ax, grid="y"):

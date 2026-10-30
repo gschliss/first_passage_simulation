@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-off probe before the ring3_t2x matrix (L102): check the cluster build reproduces the
+# One-off probe before the ring3_t2x matrix (L114): check the cluster build reproduces the
 # report's ring-2 numbers, then time shard 0 of the base cells most likely to be expensive.
 # Every chunk written here is a real chunk of the final runs (write-once, resumable).
 #

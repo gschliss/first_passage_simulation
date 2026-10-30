@@ -27,11 +27,13 @@ code is tiny; the output is not (~1.5 MB per cell), so **clone somewhere with ro
 
 ```bash
 cd /projects/$USER            # or /work/$USER, /scratch/$USER ...
-git clone git@github.com:gschliss/first_passage_simulation.git
+git clone https://github.com/gschliss/first_passage_simulation.git
 cd first_passage_simulation
 ```
 
-The repo is **private**, so the clone needs credentials.
+The repo is **public** (made so on 2026-10-29), so that clone needs no credentials at all and
+nothing below is required to get started. Read on only if you want to **push** from the
+cluster, or if the repo is made private again.
 
 ### If the machine is already signed in to GitHub
 
@@ -45,10 +47,10 @@ git config --get credential.helper     # stored token -> the https:// URL works 
 
 ### If it is not signed in
 
-**Preferred: a read-only deploy key.** It is scoped to this one repository and revocable on
-its own, so a shared cluster never holds credentials for the rest of your account. The
-cluster only needs to *pull* — results come home by `rsync`, not through git — so read-only
-is enough.
+**Preferred: a deploy key.** It is scoped to this one repository and revocable on its own, so
+a shared cluster never holds credentials for the rest of your account. Leave it read-only if
+you only ever pull there — results come home by `rsync`, not through git — and tick "Allow
+write access" only if you intend to commit from the cluster.
 
 On the cluster:
 
@@ -63,8 +65,9 @@ machine and is acceptable here *because* the key is read-only and single-repo; n
 job scripts does network git, so a passphrase would only ever be prompting you interactively.
 
 Paste the printed public key at
-**github.com/gschliss/first_passage_simulation/settings/keys** → *Add deploy key*. Leave
-"Allow write access" unticked. Then tell SSH to use it, since it is not a default key name:
+**github.com/gschliss/first_passage_simulation/settings/keys** → *Add deploy key*, ticking
+"Allow write access" only if you need to push. Then tell SSH to use it, since it is not a
+default key name:
 
 ```bash
 cat >> ~/.ssh/config <<'EOF'
@@ -365,10 +368,14 @@ through the `sweep.py` path described above.
 Sherlock is SLURM, so everything above applies. These are the parts that differ, checked
 against Stanford Research Computing's own docs (October 2026).
 
-**`gh` is not there, so don't plan on `gh auth login`.** Use the read-only deploy key from §1;
-it needs only `ssh-keygen` and `git`, which are always present.
+**Cloning needs nothing**, since the repo is public: the `https://` URL in §1 works as-is.
+`gh` is not installed on Sherlock, and Sherlock has no SSH key for GitHub out of the box, so
+`gh auth login` and `git@github.com:` URLs both fail there (`Permission denied (publickey)`).
+Neither matters unless you want to push from the cluster, in which case use the deploy key
+from §1 — it needs only `ssh-keygen` and `git`, which are always present.
 
-If `ssh -T git@github.com` hangs or is refused, outbound port 22 is blocked. GitHub serves
+If you do set up SSH and `ssh -T git@github.com` hangs or is refused, outbound port 22 is
+blocked. GitHub serves
 SSH on 443 as well, which gets through:
 
 ```bash
@@ -389,14 +396,17 @@ EOF
 | `$HOME` | 15 GB | NFS, not for parallel I/O | nothing here, it is too small to be worth the risk |
 | `$GROUP_HOME` | 1 TB | shared with your PI group | **the clone and the venv** |
 | `$SCRATCH` | 100 TB | files expire after a period without modification | **`results/`** |
-| `$OAK` | purchased | long-term, if your lab has it | results you want to keep past the purge window |
+| `$OAK` | purchased | long-term, if your lab has it; **"not designed for bursty or parallel job I/O"** | the clone, and finished results copied back off `$SCRATCH` |
 | `$L_SCRATCH` | node-local SSD | deleted when the job ends | Numba's compile cache (the submit script already uses it) |
 
-So:
+The code can sit on `$GROUP_HOME` or, if your lab has it, on `$OAK` — it is small and read
+once per task, so either is fine. What matters is that **`results/` goes on `$SCRATCH`**:
+dozens of array tasks writing Parquet chunks at once is precisely the parallel I/O that
+`$OAK` and the NFS homes are not built for.
 
 ```bash
-cd $GROUP_HOME
-git clone git@github.com:gschliss/first_passage_simulation.git
+cd $OAK/<you>/...            # or $GROUP_HOME
+git clone https://github.com/gschliss/first_passage_simulation.git
 cd first_passage_simulation
 mkdir -p $SCRATCH/fpsim_results
 rm -rf results && ln -s $SCRATCH/fpsim_results results
@@ -404,8 +414,22 @@ mkdir -p slurm/logs
 ```
 
 Mind the `$SCRATCH` purge policy: it keys off last *modification*, and finished Parquet
-chunks are never rewritten, so a matrix you leave alone will eventually age out. Copy
-anything you care about to `$OAK`, or back to your laptop, when a sweep finishes.
+chunks are never rewritten, so a matrix you leave alone will eventually age out. When a sweep
+finishes, copy it somewhere permanent — which is what `$OAK` is for:
+
+```bash
+rsync -a $SCRATCH/fpsim_results/ $OAK/<you>/fpsim_results/
+```
+
+Put the **virtual environment on `$GROUP_HOME`**, not on `$OAK` and not inside a repo that
+lives there — Stanford's docs ask for venvs on `$HOME` or `$GROUP_HOME`. An editable install
+works fine with the two split apart:
+
+```bash
+python3 -m venv $GROUP_HOME/fpsim-venv
+source $GROUP_HOME/fpsim-venv/bin/activate
+pip install --prefer-binary -e ".[dev]"   # run from the checkout; --prefer-binary: see §2
+```
 
 **Build the environment in an `sh_dev` session, not on a login node.** Stanford asks you to
 keep login nodes free, and says outright that building environments there is too heavy:
@@ -414,8 +438,8 @@ keep login nodes free, and says outright that building environments there is too
 sh_dev -c 4 -m 8GB          # a compute node: 1 h, which is plenty
 ml avail python             # see the stack as it is today
 ml python/3.12.1
-python3 -m venv .venv       # note python3: plain `python` is an old system interpreter
-source .venv/bin/activate
+python3 -m venv $GROUP_HOME/fpsim-venv   # python3: plain `python` is an old system interpreter
+source $GROUP_HOME/fpsim-venv/bin/activate
 pip install --upgrade pip
 pip install --prefer-binary -e ".[dev]"   # glibc 2.17 here: see §2
 export NUMBA_NUM_THREADS=4  # match -c above, or check_env.py warns about oversubscription
@@ -440,7 +464,7 @@ line), set the activation line to:
 
 ```bash
 ml python/3.12.1
-source .venv/bin/activate
+source $GROUP_HOME/fpsim-venv/bin/activate
 ```
 
 and submit as in §5:

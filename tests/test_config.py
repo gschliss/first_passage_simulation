@@ -83,3 +83,19 @@ def test_ten_percent_sweep_shares_a_point_with_free_fraction_sweep():
     b = cfg.sweep_point(cfg.find_point("free_fraction", free_fraction=0.10), 79.2)
     assert (a.k_on, a.k_off) == pytest.approx((b.k_on, b.k_off))  # L45
     assert a.free_dwell == pytest.approx(0.015)
+
+
+def test_to_dict_round_trips_through_from_dict():
+    """A stored run's config.json must rebuild into the same Config, and the same hash.
+
+    `to_dict` (via dataclasses.asdict) writes sweeps as a list of dicts while YAML gives a
+    mapping; `from_dict` accepts both. replay_molecule.py depends on this to re-simulate a
+    molecule with exactly the physics that produced it (L103).
+    """
+    from fpsim.jobs import config_hash
+
+    for name in ("lattice3d.yaml", "lattice2d.yaml", "mini2d.yaml"):
+        cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / name)
+        back = from_dict(cfg.to_dict())
+        assert back == cfg, name
+        assert config_hash(back) == config_hash(cfg), name

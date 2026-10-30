@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ring-3, double-t_max figures (plans ring3_t2x and ring3_t2x_n5dwell, L102-L103).
+# Ring-3, double-t_max figures (plans ring3_t2x and ring3_t2x_n5dwell, L114-L115).
 # Safe to run mid-matrix: cells without paired_ratios.csv are skipped, partial grids
 # just have blank cells. Run from the project root:  bash scripts/make_figures_ring3.sh
 set -uo pipefail

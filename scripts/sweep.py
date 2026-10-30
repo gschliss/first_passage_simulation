@@ -64,12 +64,18 @@ PLANS = {
                  dwells=["0.01", "0.1", "1", "10"]),
             dict(free_fraction=[BASE_FREE], finds=[1], target_ring=[2], receptors_per_cell=[1000],
                  dwells=["100", "600"], t_max=100000),
+            # Dwell cline at 5 finds. No t_max variants: L109 found nothing times out at the
+            # default, so the 100 s and 600 s points need no raised ceiling (the N = 1 line
+            # above uses one, which turned out to be unnecessary but is kept so its runs stay
+            # addressable by their existing config hashes).
+            dict(free_fraction=[BASE_FREE], finds=[5], target_ring=[2], receptors_per_cell=[1000],
+                 dwells=["0.01", "0.1", "1", "10", "100", "600"]),
             dict(free_fraction=[BASE_FREE], finds=[1, 2, 5, 10], target_ring=[2],
                  receptors_per_cell=[1000]),
         ],
     ),
     # The ring-2 blocks of matrix_d05 (density grid, dwell line, efficiency line) moved to ring 3,
-    # with every t_max doubled (L102). 57 cells in 13 reuse groups.
+    # with every t_max doubled (L114). 57 cells in 13 reuse groups.
     "ring3_t2x": dict(
         common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
                     tag="d05", n=400, layouts=20, dwells="1", t_max=40000),
@@ -84,7 +90,7 @@ PLANS = {
                  receptors_per_cell=[1000]),
         ],
     ),
-    # The ring3_t2x dwell line at N = 5 (L103). The 100/600 s block comes first so its new
+    # The ring3_t2x dwell line at N = 5 (L115). The 100/600 s block comes first so its new
     # reference is base task 0; the 1 s N = 5 cell is ring3_t2x's own base cell (already run).
     "ring3_t2x_n5dwell": dict(
         common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
@@ -172,11 +178,11 @@ def main():
     p.add_argument("--list", action="store_true", help="print every cell in this stage")
     p.add_argument("--dry-run", action="store_true", help="with --array-task, print the command only")
     p.add_argument("--shards", type=int, default=1,
-                   help="split every cell into M tasks via the driver's --shard K/M (scheduling only, L102). "
+                   help="split every cell into M tasks via the driver's --shard K/M (scheduling only, L114). "
                         "Sharded cells need a --replot pass once all their shards are done")
     p.add_argument("--pack", type=int, default=1,
                    help="one array task runs G consecutive tasks in turn, so short tasks add up to a "
-                        "worthwhile job (L102)")
+                        "worthwhile job (L114)")
     p.add_argument("--replot", action="store_true",
                    help="summarise and plot each cell of the stage from the chunks on disk (no shards)")
     p.add_argument("--extra", nargs=argparse.REMAINDER, default=[],
