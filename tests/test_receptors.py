@@ -56,3 +56,23 @@ def test_fibonacci_sphere_is_unit_and_even():
     d, _ = cKDTree(p).query(p, k=2)
     nn = d[:, 1] * R
     assert nn.min() > 0.4 and nn.max() < 0.7  # µm; ~0.56 µm typical spacing (L18)
+
+
+def test_receptors_on_all_cells_but_source(cluster):
+    """on_cells="all" (L117): every real cell except the source; default stays target-only."""
+    rs = make_receptors(cluster, target_ring=3, n_per_cell=3, capture_radius=0.01,
+                        rng=np.random.default_rng(0), on_cells="all")
+    has = rs.block_of_cell >= 0
+    assert has.sum() == cluster.n_cells - 1
+    assert not has[cluster.source] and not np.any(has[cluster.ring > cluster.rings])
+
+
+def test_on_cells_default_left_out_of_to_dict():
+    """New field kept out of to_dict at its default, so earlier config hashes are unchanged."""
+    import dataclasses
+    from pathlib import Path
+    from fpsim import load_config
+    cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / "lattice3d.yaml")
+    assert "on_cells" not in cfg.to_dict()["receptors"]
+    alt = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, on_cells="all"))
+    assert alt.to_dict()["receptors"]["on_cells"] == "all"

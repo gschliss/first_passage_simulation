@@ -57,7 +57,7 @@ def switch_sweep():
     return Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS)
 
 
-def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, rearm=0.010):
+def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, rearm=0.010, on_cells="target"):
     cfg = load_config(path)
     suffix = "" if FREE_FRACTION == 0.05 else f"_f{FREE_FRACTION * 100:g}"
     if finds != 1:  # captured on the finds-th receptor find (L86)
@@ -75,6 +75,9 @@ def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, r
     if n_per_cell is not None:
         cfg = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, n_per_cell=n_per_cell))
         suffix += f"_rec{n_per_cell}"
+    if on_cells != "target":  # receptors on every cell but the source (L117)
+        cfg = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, on_cells=on_cells))
+        suffix += f"_on{on_cells}"
     return dataclasses.replace(cfg, name=cfg.name + suffix, sweeps=(switch_sweep(),
                                             Sweep("free_unit", free_fraction=1.0, d_free=1.0)))
 
@@ -427,6 +430,8 @@ def main():
     p.add_argument("--layouts", type=int, default=1, help="shared receptor layouts per point (n is split across them)")
     p.add_argument("--phi", type=float, default=None, help="override the calibrated phi (free-only D_eff per unit D)")
     p.add_argument("--sizes", default="2,10", help="capture radii in nm, comma-separated (first one is plotted)")
+    p.add_argument("--receptors-on", default="target", choices=("target", "all"),
+                   help="which cells carry receptors: the target ring, or every cell but the source (L117)")
     p.add_argument("--finds", type=int, default=1, help="receptor finds needed for capture (L86; 3D only)")
     p.add_argument("--rearm", type=float, default=0.010, help="µm from the last receptor found before a new find counts")
     p.add_argument("--d-free", type=float, default=None, help="override diffusion.d_free (µm²/s) of the switching walker")
@@ -467,7 +472,7 @@ def main():
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
     FREE_FRACTION = args.free_fraction
     DWELLS = tuple(float(v) for v in args.dwells.split(","))
-    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free, args.finds, args.rearm)
+    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free, args.finds, args.rearm, args.receptors_on)
     if args.dwells != "0.005,0.0707,0.285,1.0":
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
     if args.t_max is not None:  # a different time limit is a different run, so it changes the hash and the name

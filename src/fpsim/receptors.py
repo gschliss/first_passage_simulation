@@ -42,8 +42,11 @@ def fibonacci_sphere(n: int) -> np.ndarray:
 
 
 def make_receptors(cluster: Cluster, target_ring: int, n_per_cell: int, capture_radius: float,
-                   rng: np.random.Generator) -> ReceptorSet:
-    cells = cluster.cells_in_ring(target_ring)
+                   rng: np.random.Generator, on_cells: str = "target") -> ReceptorSet:
+    if on_cells == "all":  # every real cell except the source (L117)
+        cells = np.flatnonzero((cluster.ring >= 1) & (cluster.ring <= cluster.rings))
+    else:
+        cells = cluster.cells_in_ring(target_ring)
     if cluster.dim == 2:
         angles0 = 2 * math.pi * np.arange(n_per_cell) / n_per_cell
         base = np.column_stack([np.cos(angles0), np.sin(angles0)])

@@ -62,7 +62,8 @@ def simulate(cfg: Config, sweep_index: int = 0, n_molecules: int | None = None, 
     seeds = molecule_seeds(seed, sweep_index, n, first_id)
     receptors = make_receptors(cluster, g.target_ring, cfg.receptors.n_per_cell, cfg.receptors.capture_radius,
                                np.random.default_rng([seed, sweep_index, layout_index] if layout_seed is None
-                                                     else [seed, 1_000_003, layout_seed]))
+                                                     else [seed, 1_000_003, layout_seed]),
+                               on_cells=cfg.receptors.on_cells)
     lattice = (seeds, cluster.centers, cluster.neighbors, cluster.n_cells, cluster.source,
                cluster.ring, cluster.rings, cluster.spacing)
     physics = (g.cell_radius, cfg.membrane.binding_layer, d_free, cfg.diffusion.d_bound,

@@ -39,6 +39,9 @@ class Receptors:
     n_per_cell: int = 3  # 3 in 2D, 4000 in 3D: ~0.1% coverage (L18)
     capture_radius: float = 0.010  # µm, from the receptor center (L19)
     finds_to_capture: int = 1  # captured on this many receptor finds; 1 = first passage (L86)
+    # Which cells carry receptors: "target" = the target ring only; "all" = every real cell
+    # except the source (L117). The target ring then only sizes the cluster.
+    on_cells: str = "target"
     rearm_distance: float = 0.010  # µm from the last receptor found before a new find counts (L86)
 
 
@@ -193,7 +196,8 @@ class Config:
     def to_dict(self) -> dict:
         d = dataclasses.asdict(self)
         # Multi-find settings (L86) are left out at their defaults, so earlier runs keep their config hashes.
-        for k, f in (("finds_to_capture", 1), ("rearm_distance", 0.010)):
+        # So is on_cells (L117).
+        for k, f in (("finds_to_capture", 1), ("rearm_distance", 0.010), ("on_cells", "target")):
             if d["receptors"][k] == f:
                 del d["receptors"][k]
         return d
@@ -253,6 +257,7 @@ def validate(cfg: Config) -> None:
         (r.n_per_cell >= 0, "receptors.n_per_cell must be >= 0 (0 = no receptors, e.g. for D_eff calibration)"),
         (0 < r.capture_radius < g.gap / 2, "capture_radius must be in (0, gap/2)"),
         (r.finds_to_capture >= 1, "receptors.finds_to_capture must be >= 1"),
+        (r.on_cells in ("target", "all"), "receptors.on_cells must be 'target' or 'all'"),
         (r.finds_to_capture == 1 or r.rearm_distance > r.capture_radius,
          "receptors.rearm_distance must exceed capture_radius"),
         (r.finds_to_capture == 1 or g.dim == 3, "finds_to_capture > 1 is implemented for 3D only"),
