@@ -26,12 +26,18 @@ grid() {  # grid <listing> <x> <y> <out> <title>
     && echo "ok" || echo "FAILED"
 }
 
+# Each cline yields two figures from ONE glob: the t_20 levels, and the cumulative capture
+# curves those levels are read off (L107, L120). Deriving both here keeps them from drifting
+# apart, exactly as make_figures.sh does for the ring-2 report.
 line() {  # line <listing> <x> <out> <title>
   pick "$1"
   printf '%-34s %2d points ' "$(basename "$3" ".$EXT")" "${#A[@]}"
   if [ "${#A[@]}" -lt 2 ]; then echo "(skipped)"; return; fi
   $PY scripts/plot_line.py "${A[@]}" --x "$2" --out "$F/$3" --title "$4" > /dev/null 2>&1 \
-    && echo "ok" || echo "FAILED"
+    && printf "ok" || printf "FAILED"
+  $PY scripts/plot_capture_cline.py "${A[@]}" --x "$2" --out "$F/${3/line_/capture_}" \
+    --title "${4/t_20 vs/Cumulative capture vs}" > /dev/null 2>&1 \
+    && echo " + curves ok" || echo " + curves FAILED"
 }
 
 BASE="1 s dwell"

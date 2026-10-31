@@ -60,6 +60,16 @@ line "ls -d $D/lattice3d@(|_f+([0-9.]))_ring2_rec1000_dw1000_paired20_ref0.5_d05
 line "ls -d $D/lattice3d@(|_f+([0-9.]))_finds5_ring2_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
      free_fraction line_free_fraction_N5.png \
      "t_20 vs fraction free  (3D, ring 2, $BASE, 5 finds)"
+# The free-fraction cline at target ring 3, from the ring-3 column of the distance grid: the
+# same runs the grid cells come from, so no new simulation. It is here because the grid shows
+# only t_20 levels, and the arrival curves behind them were asked for at ring 3 (L120). The
+# Sherlock double-t_max ring-3 set is a different run; its figures live in docs/figures/ring3/.
+line "ls -d $D/lattice3d@(|_f+([0-9.]))_ring3_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
+     free_fraction line_free_fraction_ring3.png \
+     "t_20 vs fraction free  (3D, ring 3, $BASE, first passage)"
+line "ls -d $D/lattice3d@(|_f+([0-9.]))_finds5_ring3_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
+     free_fraction line_free_fraction_ring3_N5.png \
+     "t_20 vs fraction free  (3D, ring 3, $BASE, 5 finds)"
 line "ls -d $D/lattice3d_ring[1234]_rec1000_dw1000_paired20_ref0.5_d05 2>/dev/null" \
      target_ring line_distance.png \
      "t_20 vs distance  (3D, 5% free, $BASE, first passage)"
