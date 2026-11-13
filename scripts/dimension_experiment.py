@@ -37,7 +37,7 @@ import pandas as pd
 from fpsim import load_config
 from fpsim.config import Receptors, Sweep
 from fpsim.deff import measure_deff
-from fpsim.jobs import Task, config_hash, merge, run_task, stem_for
+from fpsim.jobs import Task, config_hash, merge, run_task, stem_for, write_once
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DWELLS = (0.005, 0.0707, 0.285, 1.0)  # s, bound dwell (same values as the 'dwell' sweep)
@@ -173,8 +173,9 @@ def capture_runs(cfg, d_ref, out, n, layouts=1, reuse_switching=None, reuse_refe
             run_dir.mkdir(parents=True, exist_ok=True)
             manifest = dict(config=ecfg.to_dict(), config_hash=config_hash(ecfg), n_sweep_points=ecfg.n_sweep_points,
                             sweep_labels=[p.label for p in ecfg.sweep_points(1.0)])
-            if not (run_dir / "config.json").exists():
-                (run_dir / "config.json").write_text(json.dumps(manifest, indent=2, default=float))
+            # Atomic: concurrent shards of one cell all reach this line, and a reader must never
+            # see a half-written file (L122: one shard read it empty and crashed).
+            write_once(run_dir / "config.json", json.dumps(manifest, indent=2, default=float))
             copy_points(ecfg, src / f"runs_a{a * 1e3:.0f}nm", run_dir, layouts, which)
         for j, (i, c) in enumerate((i, c) for i in range(ecfg.n_sweep_points) for c in range(layouts)):
             if shard is not None and j % shard[1] != shard[0]:
