@@ -1,0 +1,33 @@
+Modeling
+
+  Standing conventions
+    - Always maintain arrival curves + t_20 statistics
+    - Unless otherwise stated... maintain 5% 3d molecules
+    - Unless otherwise stated... use 1s dwell time
+
+  1. What is the effect of confinement?
+     - Sweep (3d/2d) ratio vs effective diffusion rate (no receptors)
+     - Sweep (3d/2d) ratio vs t_20 capture rate in ring 1,2,3,4
+       (no receptors except in target ring)
+     - Sweep 0.1% -> 100% in 10 steps
+
+  2. What is the effect of confinement dwell time?
+     - Sweep dwell time vs effective diffusion rate
+     - Sweep dwell time vs t_20 capture rate in ring 1,2,3,4
+       (no receptors except in target ring)
+     - Sweep 10ms -> 1000s in 10 steps
+
+  3. What is the effect of receptor density?
+     - Compare (3d/2d) vs (3d); sweep across receptor number; measure t_20
+       in ring 1,2,3,4 (no receptors except in target ring)
+     - Sweep 10 -> 100000 in 10 steps
+
+  4. What is the effect of capture efficiency?
+     - Compare (3d/2d) vs (3d); sweep across capture efficiency; measure t_20
+       in ring 1,2,3,4 (no receptors except in target ring)
+     - Sweep 0.1% -> 100% in 10 steps
+
+  5. Pseudo-FGF vs pseudo-HH
+     - Compare (high 3d) vs (low 3d); sweep across capture efficiency; measure
+       t_20 in ring 1,2,3,4 (no receptors except in target ring)
+     - Sweep 0.1% -> 100% in 10 steps
