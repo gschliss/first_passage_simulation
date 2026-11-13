@@ -112,6 +112,9 @@ def main():
     p.add_argument("--x", required=True, choices=sorted(FIELD))
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--title", default="")
+    p.add_argument("--xlim", type=float, nargs=2, default=None, help="fix the x range (L124: shared across rings)")
+    p.add_argument("--ylim", type=float, nargs=2, default=None, help="fix the y range (L124: shared across rings)")
+    p.add_argument("--limits-out", type=Path, default=None, help="write the ranges actually used, as JSON (L124)")
     args = p.parse_args()
 
     vz.use()
@@ -137,12 +140,18 @@ def main():
             ax.annotate(vz.LABEL[role].split(" (")[0], (last.x, last.t20), xytext=(9, 0),
                         textcoords="offset points", color=vz.ROLE[role], fontsize=9.5, va="center")
         for _, m in r[r.t20.isna()].iterrows():  # no t_20: under 20% ever captured
-            ax.annotate(f"no t_20\n({m.captured:.0%} captured)", (m.x, ax.get_ylim()[1]),
+            # pinned to the top of the axes (not a data y), so a fixed --ylim cannot move it off-plot
+            ax.annotate(f"no t_20\n({m.captured:.0%} captured)", (m.x, 1.0), xycoords=("data", "axes fraction"),
                         ha="center", va="top", fontsize=8.5, color=vz.ROLE[role])
 
     ax.set_yscale("log")
     if args.x in LOG_X:
         ax.set_xscale("log")
+    ax.margins(x=0.12)
+    if args.ylim:
+        ax.set_ylim(*args.ylim)
+    if args.xlim:
+        ax.set_xlim(*args.xlim)
     xs = sorted(df.x.unique())
     ax.set_xticks(xs, [vz.AXIS_TICK[args.x](v) for v in xs])
     ax.xaxis.set_minor_locator(plt.matplotlib.ticker.NullLocator())
@@ -152,8 +161,10 @@ def main():
     ax.set_title(args.title or f"Time for 20% of molecules to find a receptor, vs {vz.AXIS_LABEL[args.x]}",
                  loc="left", color=vz.INK, pad=10)
     ax.legend(loc="best", fontsize=9.5)
-    ax.margins(x=0.12)
     vz.style(ax)
+    if args.limits_out:
+        import json
+        args.limits_out.write_text(json.dumps(dict(x=list(ax.get_xlim()), y=list(ax.get_ylim()))))
 
     print("Saved " + ", ".join(str(q) for q in vz.save(fig, args.out)))
 

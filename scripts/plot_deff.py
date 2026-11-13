@@ -48,6 +48,9 @@ def main():
     p.add_argument("--x", required=True, choices=("free_fraction", "bound_dwell"))
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--title", default="")
+    p.add_argument("--xlim", type=float, nargs=2, default=None, help="fix the x range (L124: shared across rings)")
+    p.add_argument("--ylim", type=float, nargs=2, default=None, help="fix the y range (L124: shared across rings)")
+    p.add_argument("--limits-out", type=Path, default=None, help="write the ranges actually used, as JSON (L124)")
     p.add_argument("--compare", type=Path, nargs="+", default=[],
                    help="a second set of runs (e.g. the 12-ring cluster) drawn faded for comparison (L122)")
     p.add_argument("--free-only", type=Path, default=None,
@@ -92,7 +95,14 @@ def main():
     ax.set_yscale("log")
     ax.set_xlabel(vz.AXIS_LABEL[args.x])
     ax.set_ylabel("effective diffusion D_eff (µm²/s)")
+    if args.ylim:
+        ax.set_ylim(*args.ylim)
+    if args.xlim:
+        ax.set_xlim(*args.xlim)
     vz.style(ax)
+    if args.limits_out:
+        import json
+        args.limits_out.write_text(json.dumps(dict(x=list(ax.get_xlim()), y=list(ax.get_ylim()))))
     ax.legend(loc="lower right", fontsize=9)
     if args.title:
         ax.set_title(args.title, loc="left", fontsize=11, color=vz.INK)

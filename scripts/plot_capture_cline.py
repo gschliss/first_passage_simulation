@@ -81,6 +81,8 @@ def main():
     p.add_argument("--x", required=True, choices=sorted(FIELD))
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--title", default="")
+    p.add_argument("--tlim", type=float, nargs=2, default=None, help="fix the time axis (L124: shared across rings)")
+    p.add_argument("--limits-out", type=Path, default=None, help="write the time range actually used, as JSON (L124)")
     args = p.parse_args()
 
     vz.use()
@@ -116,6 +118,10 @@ def main():
         ax.legend(loc="upper left", fontsize=9, title=vz.AXIS_LABEL[args.x],
                   title_fontsize=9, alignment="left")
 
+    if args.tlim:
+        axes[0].set_xlim(*args.tlim)  # sharex: both panels
+    if args.limits_out:
+        args.limits_out.write_text(json.dumps(dict(x=list(axes[0].get_xlim()), y=list(axes[0].get_ylim()))))
     axes[0].set_ylabel("fraction of all molecules captured")
     axes[0].annotate("t_20: the 20% crossing", xy=(axes[0].get_xlim()[0], Q), xytext=(4, -12),
                      textcoords="offset points", fontsize=9, color=vz.SECONDARY, va="top")
