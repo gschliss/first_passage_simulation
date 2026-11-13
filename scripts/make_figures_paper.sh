@@ -53,7 +53,7 @@ for spec in "01_confinement free_fraction fraction_free" "02_dwell_time bound_dw
   runs=($D/$1/deff/*)
   if [ "${#runs[@]}" -lt 2 ]; then echo "$1 D_eff (skipped)"; continue; fi
   extra=(); fo=($D/01_confinement/deff/*_f100_*); [ "$1" = 02_dwell_time ] && [ "${#fo[@]}" -gt 0 ] && extra=(--free-only "${fo[0]}")
-  $PY scripts/plot_deff.py "${runs[@]}" --x $2 --out "$F/$1/deff_$3.png" "${extra[@]}" \
+  $PY scripts/plot_deff.py "${runs[@]}" --x $2 --out "$F/$1/deff_$3.png" ${extra[@]+"${extra[@]}"} \
     --title "Effective diffusion vs ${3//_/ }  (receptor-free, 1000 molecules)" 2>&1 | tail -1
 done
 
