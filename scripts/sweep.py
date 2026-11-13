@@ -68,6 +68,13 @@ def paper_deff_cell(dwell):
     return dict(dwells=[dwell], long_lag=[long_lag], short_lag=[long_lag / 10], cal_t_max=[3 * long_lag])
 
 
+PLANS_PAPER_DEFF_COMMON = dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, tag="paper", n=1000,
+                               layouts=20, target_ring=2, receptors_per_cell=1000, free_fraction=BASE_FREE,
+                               calibration_only=True, calibrate_switch_only=True)
+PAPER_DEFF_BLOCKS = ([dict(free_fraction=PAPER_FREES, out_root=[f"{PAPER_ROOT}/01_confinement/deff"],
+                           **paper_deff_cell("1"))]
+                     + [dict(out_root=[f"{PAPER_ROOT}/02_dwell_time/deff"], **paper_deff_cell(d)) for d in PAPER_DWELLS])
+
 PLANS = {
     # The matrix behind docs/report_d05.md (L96). 87 cells.
     "matrix_d05": dict(
@@ -148,17 +155,22 @@ PLANS = {
             dict(finds=PAPER_FINDS, target_ring=PAPER_RINGS, out_root=f"{PAPER_ROOT}/04_capture_efficiency"),
             dict(free_fraction=[0.5], finds=PAPER_FINDS, target_ring=PAPER_RINGS,
                  out_root=f"{PAPER_ROOT}/05_fgf_vs_hh"),
+            # L122: the cells still searching at 100 000 s, again at 500 000 s. Appended last so no
+            # earlier task index moves; they reuse 02_dwell_time's 500 000 s references.
+            dict(free_fraction=[0.001], target_ring=[3, 4], t_max=500000,
+                 out_root=f"{PAPER_ROOT}/01_confinement/tmax500000"),
+            dict(free_fraction=[0.00215], target_ring=[4], t_max=500000,
+                 out_root=f"{PAPER_ROOT}/01_confinement/tmax500000"),
         ],
     ),
     # Effective diffusion for experiments 1 and 2 (L121): receptor-free calibration only, in
     # deff_calibration's own 12-ring cluster, so the target ring does not enter (2 is nominal).
-    "paper_deff": dict(
-        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, tag="paper", n=1000,
-                    layouts=20, target_ring=2, receptors_per_cell=1000, free_fraction=BASE_FREE,
-                    calibration_only=True, calibrate_switch_only=True),
-        blocks=[dict(free_fraction=PAPER_FREES, out_root=[f"{PAPER_ROOT}/01_confinement/deff"],
-                     **paper_deff_cell("1"))]
-               + [dict(out_root=[f"{PAPER_ROOT}/02_dwell_time/deff"], **paper_deff_cell(d)) for d in PAPER_DWELLS],
+    "paper_deff": dict(common=PLANS_PAPER_DEFF_COMMON, blocks=PAPER_DEFF_BLOCKS),
+    # L122: the same D_eff cells in a 20-ring cluster (up to 9.5% escaped the 12-ring one).
+    "paper_deff20": dict(
+        common=dict(PLANS_PAPER_DEFF_COMMON, cal_rings=20),
+        blocks=[dict(b, out_root=[r.replace("/deff", "/deff_20rings") for r in b["out_root"]])
+                for b in PAPER_DEFF_BLOCKS],
     ),
     "ring3_t2x_n5dwell": dict(
         common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,

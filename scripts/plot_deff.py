@@ -48,6 +48,8 @@ def main():
     p.add_argument("--x", required=True, choices=("free_fraction", "bound_dwell"))
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--title", default="")
+    p.add_argument("--compare", type=Path, nargs="+", default=[],
+                   help="a second set of runs (e.g. the 12-ring cluster) drawn faded for comparison (L122)")
     p.add_argument("--free-only", type=Path, default=None,
                    help="a 100%%-free calibration run whose D_eff is drawn as the free-only level")
     args = p.parse_args()
@@ -69,6 +71,14 @@ def main():
     fig, ax = plt.subplots(figsize=(7.6, 4.8))
     ax.errorbar(t[args.x], t.d_eff, yerr=1.96 * t.d_eff_se, color=vz.SWITCH, marker="o", lw=2,
                 capsize=3, label="switching: D_eff (long lag)")
+    if args.compare:
+        c = load(args.compare).sort_values(args.x)
+        if len(c):
+            ax.errorbar(c[args.x], c.d_eff, yerr=1.96 * c.d_eff_se, color=vz.MUTED, marker="o", ms=5,
+                        lw=1.2, capsize=2, alpha=0.8, label="comparison set (e.g. 12-ring cluster)")
+            t = t.merge(c[[args.x, "d_eff", "escaped"]].rename(columns={"d_eff": "d_eff_compare",
+                        "escaped": "escaped_compare"}), on=args.x, how="left")
+            t.to_csv(args.out.with_suffix(".csv"), index=False)
     ax.plot(t[args.x], t.d_eff_short, color=vz.SWITCH, ls=(0, (3, 2)), lw=1.2, alpha=0.7,
             label="switching: short-lag value")
     ax.axhline(D_MICRO, color=vz.MUTED, lw=1, ls=(0, (4, 3)))

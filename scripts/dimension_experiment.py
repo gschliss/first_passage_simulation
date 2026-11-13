@@ -82,7 +82,7 @@ def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, r
                                             Sweep("free_unit", free_fraction=1.0, d_free=1.0)))
 
 
-def calibrate(cfg, out, n, t_max, short_lag, long_lag, switch_only=False):
+def calibrate(cfg, out, n, t_max, short_lag, long_lag, switch_only=False, cluster_rings=12):
     """``switch_only``: measure the switching points only, not the free-only unit walker that
     gives phi (L121) -- phi is geometric and needs measuring once, not once per cell."""
     path = out / "calibration.csv"
@@ -90,7 +90,7 @@ def calibrate(cfg, out, n, t_max, short_lag, long_lag, switch_only=False):
         return pd.read_csv(path)
     rows = []
     for i in range(len(DWELLS) if switch_only else cfg.n_sweep_points):
-        r = measure_deff(cfg, i, n, t_max, short_lag, long_lag)
+        r = measure_deff(cfg, i, n, t_max, short_lag, long_lag, cluster_rings)
         rows.append(dict(dataclasses.asdict(r), role="switch" if i < len(DWELLS) else "free_unit",
                          bound_dwell=DWELLS[i] if i < len(DWELLS) else np.nan))
         print(f"  D_eff {r.label}: {r.d_eff:.4f} ± {r.d_eff_se:.4f} (short lag {r.d_eff_short:.4f}), escaped {r.escaped}", flush=True)
@@ -427,6 +427,8 @@ def main():
     p.add_argument("--out", type=Path, default=None, help="output directory (default results/dimension/<config name>)")
     p.add_argument("--out-root", type=Path, default=None,
                    help="parent of the run directory instead of results/dimension; the run name is unchanged (L121)")
+    p.add_argument("--cal-rings", type=int, default=12,
+                   help="rings in the receptor-free calibration cluster (L122; 12 so far)")
     p.add_argument("--calibration-only", action="store_true",
                    help="measure D_eff (calibration.csv) and stop: no reference, no capture runs (L121)")
     p.add_argument("--calibrate-switch-only", action="store_true",
@@ -514,7 +516,8 @@ def main():
         d_eff = cal.d_eff.to_numpy()
     else:
         print("1. D_eff calibration", flush=True)
-        cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag, args.calibrate_switch_only)
+        cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag, args.calibrate_switch_only,
+                        args.cal_rings)
         if args.calibration_only:  # L121: D_eff is the product; no reference or capture runs
             print(f"Calibration only: wrote {out / 'calibration.csv'}")
             return

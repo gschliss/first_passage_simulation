@@ -57,6 +57,28 @@ for spec in "01_confinement free_fraction fraction_free" "02_dwell_time bound_dw
     --title "Effective diffusion vs ${3//_/ }  (receptor-free, 1000 molecules)" 2>&1 | tail -1
 done
 
+# L122: D_eff again in a 20-ring cluster, and the low-free cells rerun at t_max 500 000 s.
+for spec in "01_confinement free_fraction fraction_free" "02_dwell_time bound_dwell dwell"; do
+  set -- $spec
+  runs=($D/$1/deff_20rings/*)
+  if [ "${#runs[@]}" -lt 2 ]; then echo "$1 D_eff 20 rings (skipped)"; continue; fi
+  $PY scripts/plot_deff.py "${runs[@]}" --x $2 --out "$F/$1/deff_$3_20rings.png" --compare $D/$1/deff/* \
+    --title "Effective diffusion vs ${3//_/ }  (20-ring cluster; faded: 12-ring)" 2>&1 | tail -1
+done
+for k in 3 4; do
+  long=($D/01_confinement/tmax500000/lattice3d*_ring${k}_*)
+  [ "${#long[@]}" -eq 0 ] && continue
+  keep=()
+  for d in $D/01_confinement/lattice3d*_ring${k}_*; do
+    f=$(basename "$d" | sed -n 's/^lattice3d_f\([0-9.]*\)_.*/\1/p')
+    skip=0; for l in "${long[@]}"; do [ -n "$f" ] && [[ $(basename "$l") == lattice3d_f${f}_* ]] && skip=1; done
+    [ $skip -eq 0 ] && keep+=("$d")
+  done
+  cline 01_confinement free_fraction fraction_free_longtail $k \
+    "fraction of time free, lowest points at t_max 500 000 s  (3D, 1000 molecules per walker, 1 s dwell)" \
+    "${long[@]}" "${keep[@]}"
+done
+
 echo "== tables and the FGF vs HH overlay =="
 $PY - <<'EOF'
 import json
