@@ -161,6 +161,10 @@ PLANS = {
                  out_root=f"{PAPER_ROOT}/01_confinement/tmax500000"),
             dict(free_fraction=[0.00215], target_ring=[4], t_max=500000,
                  out_root=f"{PAPER_ROOT}/01_confinement/tmax500000"),
+            # L123: an intermediate 1%-free walker for the FGF vs HH comparison (user request);
+            # appended last, reusing 04's references (the reference ignores the free fraction).
+            dict(free_fraction=[0.01], finds=PAPER_FINDS, target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER_ROOT}/05_fgf_vs_hh/1pct_free"),
         ],
     ),
     # Effective diffusion for experiments 1 and 2 (L121): receptor-free calibration only, in

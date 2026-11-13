@@ -45,6 +45,8 @@ for k in 1 2 3 4; do
     $D/04_capture_efficiency/lattice3d*_ring${k}_*
   cline 05_fgf_vs_hh finds_to_capture capture_efficiency_50pct_free $k "capture efficiency 1/N, 50% free (pseudo-FGF)  ($CONV)" \
     $D/05_fgf_vs_hh/lattice3d*_ring${k}_*
+  cline 05_fgf_vs_hh finds_to_capture capture_efficiency_1pct_free $k "capture efficiency 1/N, 1% free (intermediate)  ($CONV)" \
+    $D/05_fgf_vs_hh/1pct_free/lattice3d*_ring${k}_*
 done
 
 echo "== effective diffusion =="
@@ -91,7 +93,11 @@ import vizstyle as vz
 
 D, F = Path("results/paper_2026_11_02"), Path("paper_figures/2026_11_02")
 rows = []
-for exp in sorted(p for p in D.iterdir() if p.is_dir() and p.name[:2].isdigit()) if D.exists() else []:
+# Every folder holding run directories: the experiments, and sub-folders such as
+# 05_fgf_vs_hh/1pct_free or 01_confinement/tmax500000 (L122-L123), labelled by relative path.
+groups = sorted({r.parent for r in D.glob("0*/**/lattice3d*") if (r / "paired_ratios.csv").exists()}) if D.exists() else []
+for exp in groups:
+    label = str(exp.relative_to(D)).replace("/", "__")
     for run in sorted(exp.glob("lattice3d*")):
         pr, cj = run / "paired_ratios.csv", run / "runs_a2nm" / "config.json"
         if not (pr.exists() and cj.exists()):
@@ -99,7 +105,7 @@ for exp in sorted(p for p in D.iterdir() if p.is_dir() and p.name[:2].isdigit())
         cfg = json.loads(cj.read_text())["config"]
         sw = next(s for s in cfg["sweeps"] if s["name"] == "switch")
         p = pd.read_csv(pr).iloc[0]
-        rows.append(dict(experiment=exp.name, target_ring=cfg["geometry"]["target_ring"],
+        rows.append(dict(experiment=label, target_ring=cfg["geometry"]["target_ring"],
                          free_fraction=sw.get("free_fraction"), bound_dwell=p.bound_dwell,
                          receptors_per_cell=cfg["receptors"]["n_per_cell"],
                          finds_to_capture=cfg["receptors"].get("finds_to_capture", 1),
@@ -109,18 +115,20 @@ for exp in sorted(p for p in D.iterdir() if p.is_dir() and p.name[:2].isdigit())
                          captured_switch=p.captured_switch, captured_ref=p.captured_ref, run=run.name))
 t = pd.DataFrame(rows)
 for exp, g in (t.groupby("experiment") if len(t) else []):
-    (F / exp).mkdir(parents=True, exist_ok=True)
-    g.to_csv(F / exp / f"summary_{exp}.csv", index=False)
-    print(f"  {exp}: {len(g)} cells -> summary_{exp}.csv")
+    top = exp.split("__")[0]
+    (F / top).mkdir(parents=True, exist_ok=True)
+    g.to_csv(F / top / f"summary_{exp}.csv", index=False)
+    print(f"  {exp}: {len(g)} cells -> {top}/summary_{exp}.csv")
 
 # Pseudo-FGF (50% free, experiment 5) vs pseudo-HH (5% free, experiment 4) vs free-only.
 vz.use()
-both = t[t.experiment.isin(["04_capture_efficiency", "05_fgf_vs_hh"])] if len(t) else t
+both = t[t.experiment.isin(["04_capture_efficiency", "05_fgf_vs_hh", "05_fgf_vs_hh__1pct_free"])] if len(t) else t
 if len(both):
     fig, axes = plt.subplots(2, 4, figsize=(16, 7.2), sharex=True, gridspec_kw=dict(hspace=0.25))
     for j, k in enumerate((1, 2, 3, 4)):
-        for exp, colour, lab in (("05_fgf_vs_hh", vz.SWITCH, "high 3D: 50% free (pseudo-FGF)"),
-                                 ("04_capture_efficiency", vz.SEQ(0.45), "low 3D: 5% free (pseudo-HH)")):
+        for exp, colour, lab in (("05_fgf_vs_hh", vz.SEQ(0.95), "high 3D: 50% free (pseudo-FGF)"),
+                                 ("04_capture_efficiency", vz.SEQ(0.6), "low 3D: 5% free (pseudo-HH)"),
+                                 ("05_fgf_vs_hh__1pct_free", vz.SEQ(0.3), "lower 3D: 1% free")):
             g = both[(both.experiment == exp) & (both.target_ring == k)].sort_values("capture_efficiency")
             axes[0, j].plot(g.capture_efficiency, g.t20_switch, "o-", color=colour, label=lab)
             axes[1, j].plot(g.capture_efficiency, g.captured_switch, "o-", color=colour)
