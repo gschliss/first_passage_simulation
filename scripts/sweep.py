@@ -46,7 +46,27 @@ BASE_FREE = 0.05  # the free fraction whose cell computes the reference for its 
 # The reference never binds, so neither the free fraction nor the dwell *value* reaches it. The
 # dwell *count* does, because molecule seeds depend on the sweep index, so group_key keeps it.
 # t_max is deliberately absent: a different ceiling is a different reference run.
-NOT_IN_REFERENCE = ("free_fraction", "dwells")
+# out_root only says which experiment folder a cell is filed under (L121).
+NOT_IN_REFERENCE = ("free_fraction", "dwells", "out_root")
+
+# Paper experiments (paper_instructions/2026_11_02.txt, L121): 10 log-spaced steps per sweep,
+# target rings 1-4, 1000 molecules per arm, t_max 5x the report's (100 000 s; 500 000 s for
+# dwells >= 100 s). Raw output under PAPER_ROOT/<NN_experiment>/, figures in paper_figures/.
+PAPER_ROOT = "results/paper_2026_11_02"
+PAPER_FREES = [0.001, 0.00215, 0.00464, 0.01, 0.0215, 0.0464, 0.1, 0.215, 0.464, 1.0]
+PAPER_DWELLS = ["0.01", "0.0359", "0.129", "0.464", "1.67", "5.99", "21.5", "77.4", "278", "1000"]
+PAPER_DENSITY = [10, 28, 77, 215, 599, 1668, 4642, 12915, 35938, 100000]
+PAPER_FINDS = [1000, 464, 215, 100, 46, 22, 10, 5, 2, 1]  # capture efficiency p = 1/N, 0.1% .. 100%
+PAPER_RINGS = [1, 2, 3, 4]
+PAPER_LONG = ["278", "1000"]  # dwells >= 100 s get the higher ceiling
+
+
+def paper_deff_cell(dwell):
+    """D_eff lags scaled to the dwell (L121): long lag max(2500 s, 10 x dwell), short lag a tenth
+    of that, and a run three long lags long."""
+    long_lag = max(2500.0, 10 * float(dwell))
+    return dict(dwells=[dwell], long_lag=[long_lag], short_lag=[long_lag / 10], cal_t_max=[3 * long_lag])
+
 
 PLANS = {
     # The matrix behind docs/report_d05.md (L96). 87 cells.
@@ -113,6 +133,32 @@ PLANS = {
                     target_ring=3, receptors_per_cell=1000, receptors_on="all",
                     free_fraction=BASE_FREE),
         blocks=[dict(dwells=["1"]), dict(dwells=["100"], t_max=200000)],
+    ),
+    "paper": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="paper", n=1000, layouts=20, dwells="1", t_max=100000, finds=1,
+                    receptors_per_cell=1000, free_fraction=BASE_FREE),
+        blocks=[
+            dict(free_fraction=PAPER_FREES, target_ring=PAPER_RINGS, out_root=f"{PAPER_ROOT}/01_confinement"),
+            dict(dwells=[d for d in PAPER_DWELLS if d not in PAPER_LONG], target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER_ROOT}/02_dwell_time"),
+            dict(dwells=PAPER_LONG, t_max=500000, target_ring=PAPER_RINGS, out_root=f"{PAPER_ROOT}/02_dwell_time"),
+            dict(receptors_per_cell=PAPER_DENSITY, target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER_ROOT}/03_receptor_density"),
+            dict(finds=PAPER_FINDS, target_ring=PAPER_RINGS, out_root=f"{PAPER_ROOT}/04_capture_efficiency"),
+            dict(free_fraction=[0.5], finds=PAPER_FINDS, target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER_ROOT}/05_fgf_vs_hh"),
+        ],
+    ),
+    # Effective diffusion for experiments 1 and 2 (L121): receptor-free calibration only, in
+    # deff_calibration's own 12-ring cluster, so the target ring does not enter (2 is nominal).
+    "paper_deff": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, tag="paper", n=1000,
+                    layouts=20, target_ring=2, receptors_per_cell=1000, free_fraction=BASE_FREE,
+                    calibration_only=True, calibrate_switch_only=True),
+        blocks=[dict(free_fraction=PAPER_FREES, out_root=[f"{PAPER_ROOT}/01_confinement/deff"],
+                     **paper_deff_cell("1"))]
+               + [dict(out_root=[f"{PAPER_ROOT}/02_dwell_time/deff"], **paper_deff_cell(d)) for d in PAPER_DWELLS],
     ),
     "ring3_t2x_n5dwell": dict(
         common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,

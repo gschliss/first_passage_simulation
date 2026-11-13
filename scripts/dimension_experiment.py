@@ -82,12 +82,14 @@ def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, r
                                             Sweep("free_unit", free_fraction=1.0, d_free=1.0)))
 
 
-def calibrate(cfg, out, n, t_max, short_lag, long_lag):
+def calibrate(cfg, out, n, t_max, short_lag, long_lag, switch_only=False):
+    """``switch_only``: measure the switching points only, not the free-only unit walker that
+    gives phi (L121) -- phi is geometric and needs measuring once, not once per cell."""
     path = out / "calibration.csv"
     if path.exists():
         return pd.read_csv(path)
     rows = []
-    for i in range(cfg.n_sweep_points):
+    for i in range(len(DWELLS) if switch_only else cfg.n_sweep_points):
         r = measure_deff(cfg, i, n, t_max, short_lag, long_lag)
         rows.append(dict(dataclasses.asdict(r), role="switch" if i < len(DWELLS) else "free_unit",
                          bound_dwell=DWELLS[i] if i < len(DWELLS) else np.nan))
@@ -422,6 +424,12 @@ def main():
     p.add_argument("--long-lag", type=float, default=500.0)
     p.add_argument("--replot", action="store_true")
     p.add_argument("--out", type=Path, default=None, help="output directory (default results/dimension/<config name>)")
+    p.add_argument("--out-root", type=Path, default=None,
+                   help="parent of the run directory instead of results/dimension; the run name is unchanged (L121)")
+    p.add_argument("--calibration-only", action="store_true",
+                   help="measure D_eff (calibration.csv) and stop: no reference, no capture runs (L121)")
+    p.add_argument("--calibrate-switch-only", action="store_true",
+                   help="calibrate the switching points only, skipping the free-only unit walker that measures phi (L121)")
     p.add_argument("--target-ring", type=int, default=None, help="override geometry.target_ring")
     p.add_argument("--receptors-per-cell", type=int, default=None, help="override receptors.n_per_cell")
     p.add_argument("--free-fraction", type=float, default=0.05, help="free fraction of the switching walker")
@@ -485,7 +493,7 @@ def main():
         REF_LABEL = f"free-only, D = {args.d_ref:g} µm²/s"
     if args.tag:
         cfg = dataclasses.replace(cfg, name=cfg.name + f"_{args.tag}")
-    out = args.out or PROJECT_ROOT / "results" / "dimension" / cfg.name
+    out = args.out or (args.out_root or PROJECT_ROOT / "results" / "dimension") / cfg.name
     if args.print_out_dir:
         print(out)
         return
@@ -505,8 +513,12 @@ def main():
         d_eff = cal.d_eff.to_numpy()
     else:
         print("1. D_eff calibration", flush=True)
-        cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag)
-        phi = args.phi if args.phi is not None else float(cal[cal.role == "free_unit"].d_eff.iloc[0])  # D_eff per unit D
+        cal = calibrate(cfg, out, args.n, args.cal_t_max, args.short_lag, args.long_lag, args.calibrate_switch_only)
+        if args.calibration_only:  # L121: D_eff is the product; no reference or capture runs
+            print(f"Calibration only: wrote {out / 'calibration.csv'}")
+            return
+        unit = cal[cal.role == "free_unit"].d_eff
+        phi = args.phi if args.phi is not None else (float(unit.iloc[0]) if len(unit) else np.nan)  # D_eff per unit D
         d_eff = cal[cal.role == "switch"].d_eff.to_numpy()
     d_ref = d_eff / phi if args.d_ref is None else np.full(len(DWELLS), args.d_ref)
     stored = out / f"runs_a{SIZES[0] * 1e3:.0f}nm" / "config.json"
