@@ -242,6 +242,15 @@ def tortuosity_figure(out):
             gap = float(m.group(1)) - (20000 - 2 if kind == "invisible" else 0)  # nominal gap at the same spacing
             rows.append(dict(kind=kind, gap_nm=gap, d_eff=c.d_eff, d_eff_se=c.d_eff_se, d_short=c.d_eff_short,
                              escaped=c.escaped, n=c.n))
+    # Cost pilots (L128): small-n runs outside the production folders, drawn as separate, labelled
+    # points so their wide error bars are not mistaken for production ones. Cell index -> gap.
+    pilot_gap = {"cell4": 7.5, "full10_cell0": 1, "full10_cell1": 2, "full10_cell2": 3, "full10_cell30": 1}
+    for d in sorted((D / "pilot_tortuosity").glob("*cell*")):
+        f = d / "calibration.csv"
+        if f.exists() and d.name in pilot_gap:
+            c = pd.read_csv(f).iloc[0]
+            rows.append(dict(kind="pilot_halfstep" if d.name.endswith("cell30") else "pilot", gap_nm=pilot_gap[d.name],
+                             d_eff=c.d_eff, d_eff_se=c.d_eff_se, d_short=c.d_eff_short, escaped=c.escaped, n=c.n))
     if not rows:
         print("  06_tortuosity: no runs yet")
         return
@@ -258,6 +267,12 @@ def tortuosity_figure(out):
                            label=f"{lab}: effective D (5000 s lag)")
             ax[j].plot(r.gap_nm, r.d_short, "^--", color=colour, ms=4, lw=1, alpha=0.7,
                        label=f"{lab}: instantaneous D (2 s lag)")
+        for kind, mk, lab in (("pilot", "s", "solid, cost pilot (n = {n}): effective D"),
+                              ("pilot_halfstep", "D", "solid, cost pilot, half step (n = {n}): effective D")):
+            pr = t[t.kind == kind]
+            for n_mol, g in pr.groupby("n"):
+                ax[j].errorbar(g.gap_nm, g.d_eff, yerr=1.96 * g.d_eff_se, fmt=mk, color=vz.SWITCH, ms=6,
+                               mfc="white", elinewidth=1, capsize=2, label=lab.format(n=int(n_mol)))
         sc = t[t.kind == "stepcheck"]
         if len(sc):
             ax[j].errorbar(sc.gap_nm, sc.d_eff, yerr=1.96 * sc.d_eff_se, fmt="D", color=vz.INK, ms=6,
