@@ -57,7 +57,8 @@ def switch_sweep():
     return Sweep("switch", free_fraction=FREE_FRACTION, bound_dwell=DWELLS)
 
 
-def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, rearm=0.010, on_cells="target"):
+def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, rearm=0.010, on_cells="target",
+                gap_nm=None, cell_radius=None, distance_fraction=None):
     cfg = load_config(path)
     suffix = "" if FREE_FRACTION == 0.05 else f"_f{FREE_FRACTION * 100:g}"
     if finds != 1:  # captured on the finds-th receptor find (L86)
@@ -78,6 +79,20 @@ def base_config(path, target_ring=None, n_per_cell=None, d_free=None, finds=1, r
     if on_cells != "target":  # receptors on every cell but the source (L117)
         cfg = dataclasses.replace(cfg, receptors=dataclasses.replace(cfg.receptors, on_cells=on_cells))
         suffix += f"_on{on_cells}"
+    if gap_nm is not None or cell_radius is not None:  # tortuosity sweep (L127)
+        g = cfg.geometry
+        g = dataclasses.replace(g, gap=g.gap if gap_nm is None else gap_nm * 1e-3,
+                                cell_radius=g.cell_radius if cell_radius is None else cell_radius)
+        # The binding layer and capture radius only matter to a walker that binds or meets
+        # receptors; for the non-binding, receptor-free walker of experiment 6 they only set how
+        # finely it steps near a surface. They must stay under gap/2, so they shrink with the gap.
+        cfg = dataclasses.replace(cfg, geometry=g,
+                                  membrane=dataclasses.replace(cfg.membrane, binding_layer=min(cfg.membrane.binding_layer, g.gap / 4)),
+                                  receptors=dataclasses.replace(cfg.receptors, capture_radius=min(cfg.receptors.capture_radius, g.gap / 4)))
+        suffix += (f"_gap{gap_nm:g}nm" if gap_nm is not None else "") + (f"_R{cell_radius:g}" if cell_radius is not None else "")
+    if distance_fraction is not None:  # step-size check (L127)
+        cfg = dataclasses.replace(cfg, stepping=dataclasses.replace(cfg.stepping, distance_fraction=distance_fraction))
+        suffix += f"_df{distance_fraction:g}"
     return dataclasses.replace(cfg, name=cfg.name + suffix, sweeps=(switch_sweep(),
                                             Sweep("free_unit", free_fraction=1.0, d_free=1.0)))
 
@@ -427,6 +442,10 @@ def main():
     p.add_argument("--out", type=Path, default=None, help="output directory (default results/dimension/<config name>)")
     p.add_argument("--out-root", type=Path, default=None,
                    help="parent of the run directory instead of results/dimension; the run name is unchanged (L121)")
+    p.add_argument("--gap-nm", type=float, default=None, help="cell-cell gap in nm (default: the config's, 500 nm; L127)")
+    p.add_argument("--cell-radius", type=float, default=None,
+                   help="cell radius in um; a tiny radius at fixed spacing makes the cells effectively invisible (L127)")
+    p.add_argument("--distance-fraction", type=float, default=None, help="override stepping.distance_fraction (L127)")
     p.add_argument("--cal-rings", type=int, default=12,
                    help="rings in the receptor-free calibration cluster (L122; 12 so far)")
     p.add_argument("--calibration-only", action="store_true",
@@ -483,7 +502,8 @@ def main():
     SIZES = tuple(float(v) * 1e-3 for v in args.sizes.split(","))
     FREE_FRACTION = args.free_fraction
     DWELLS = tuple(float(v) for v in args.dwells.split(","))
-    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free, args.finds, args.rearm, args.receptors_on)
+    cfg = base_config(args.config, args.target_ring, args.receptors_per_cell, args.d_free, args.finds, args.rearm, args.receptors_on,
+                      args.gap_nm, args.cell_radius, args.distance_fraction)
     if args.dwells != "0.005,0.0707,0.285,1.0":
         cfg = dataclasses.replace(cfg, name=cfg.name + "_dw" + "-".join(f"{d * 1e3:g}" for d in DWELLS))
     if args.t_max is not None:  # a different time limit is a different run, so it changes the hash and the name
