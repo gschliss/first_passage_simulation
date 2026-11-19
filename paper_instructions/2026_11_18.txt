@@ -1,0 +1,39 @@
+Modeling
+
+  Standing conventions
+    - Always maintain arrival curves + t_20 statistics
+    - Unless otherwise stated... maintain 5% 3d molecules
+    - Unless otherwise stated... use 1s dwell time
+    - Unless otherwise stated... use 5000 receptors per cell
+    - use steps that a human might have chosen, i.e. prefer whole numbers (10's 50's 100's etc.) 
+    - plot PDFs (no PNGs) with log x scale and linear x scale (both scales in the same file)
+    - make a set of plots with t_20 on the y axis, and make another with the inverse on the y axis, i.e. to plot each independent variable vs a statistic that looks a bit like a  diffusion rate (rather than arrival time)
+
+  1. What is the effect of confinement?
+     - Sweep (3d/2d) ratio vs effective diffusion rate (no receptors)
+     - Sweep (3d/2d) ratio vs t_20 capture rate in ring 1,2,3,4
+       (no receptors except in target ring)
+     - Sweep 0% -> 100% free in >=10 steps (including 0, 0.1%, 0.5% , 1% , 2.5% , 5% , 10%, 20%,30%,40%,50%,60%,70%,80%,90%,100%)
+
+  2. What is the effect of confinement dwell time?
+     - Sweep dwell time vs effective diffusion rate (measure both short-lag, to estiamte instantaneous diffusion rate and very-long-lag to estimate effective diffusion rate)
+     - Sweep dwell time vs t_20 capture rate in ring 1,2,3,4
+       (no receptors except in target ring)
+     - Sweep 0ms -> 1000s in >=10 steps
+
+  3. What is the effect of receptor density?
+     - Compare (3d/2d) vs (3d); sweep across receptor number; measure t_20
+       in ring 1,2,3,4 (no receptors except in target ring)
+     - Sweep 1 -> 100000 in >=10 steps, including 1000, 5000 ,1000
+
+  4. What is the effect of capture efficiency?
+     - Compare (3d/2d) vs (3d); sweep across capture efficiency; measure t_20
+       in ring 1,2,3,4 (no receptors except in target ring)
+     - Sweep 0.1% -> 100% in >=10 steps
+     - plot with x axis as percent effeciency, i.e. inverse of "number of finds." number of finds should be deterministic, i.e. for 1% score a "hit" after a ligand encounters exactly 100 receptors. it doesnt need to be 100 repeat binding events with the same receptor.
+
+  5. Pseudo-FGF vs pseudo-HH
+     - Compare (high 3d 75% free) vs (med 3d 5% free) vs (low 3d 1% free); sweep across capture efficiency; measure
+       t_20 in ring 1,2,3,4 (no receptors except in target ring)
+     - Sweep 0.1% -> 100% in >= 10 steps
+
