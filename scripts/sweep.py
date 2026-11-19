@@ -68,6 +68,27 @@ def paper_deff_cell(dwell):
     return dict(dwells=[dwell], long_lag=[long_lag], short_lag=[long_lag / 10], cal_t_max=[3 * long_lag])
 
 
+# Revised paper experiments (paper_instructions/2026_11_18.txt, L125): 5000 receptors by default,
+# human-chosen steps, extra points where the behaviour changes, near-zero stand-ins for 0% free
+# (0.01%) and 0 ms dwell (0.1 ms), FGF vs HH at 75 / 5 / 1% free.
+PAPER2_ROOT = "results/paper_2026_11_18"
+PAPER2_FREES = [0.0001, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01, 0.015, 0.02,
+                0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+PAPER2_DWELLS = ["0.0001", "0.001", "0.01", "0.05", "0.1", "0.5", "1", "5", "10", "25", "40", "50", "60", "75",
+                 "100", "250", "500", "1000"]
+PAPER2_LONG = ["100", "250", "500", "1000"]  # dwells >= 100 s: t_max 500 000 s
+PAPER2_DENSITY = [1, 10, 50, 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 4000, 5000, 7500,
+                  10000, 25000, 50000, 100000]
+PAPER2_FINDS = [1000, 500, 200, 100, 50, 20, 10, 5, 4, 2, 1]  # efficiency 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 25, 50, 100%
+
+
+def paper2_deff_cell(dwell):
+    """L125: instantaneous D from a 2 s lag (the stored-trajectory interval), effective D from a very
+    long lag max(5000 s, 20 x dwell); runs three long lags, in a 20-ring cluster."""
+    long_lag = max(5000.0, 20 * float(dwell))
+    return dict(dwells=[dwell], long_lag=[long_lag], short_lag=[2.0], cal_t_max=[3 * long_lag])
+
+
 PLANS_PAPER_DEFF_COMMON = dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, tag="paper", n=1000,
                                layouts=20, target_ring=2, receptors_per_cell=1000, free_fraction=BASE_FREE,
                                calibration_only=True, calibrate_switch_only=True)
@@ -170,6 +191,29 @@ PLANS = {
     # Effective diffusion for experiments 1 and 2 (L121): receptor-free calibration only, in
     # deff_calibration's own 12-ring cluster, so the target ring does not enter (2 is nominal).
     "paper_deff": dict(common=PLANS_PAPER_DEFF_COMMON, blocks=PAPER_DEFF_BLOCKS),
+    "paper2": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
+                    tag="paper", n=1000, layouts=20, dwells="1", t_max=100000, finds=1,
+                    receptors_per_cell=5000, free_fraction=BASE_FREE),
+        blocks=[
+            dict(free_fraction=PAPER2_FREES, target_ring=PAPER_RINGS, out_root=f"{PAPER2_ROOT}/01_confinement"),
+            dict(dwells=[d for d in PAPER2_DWELLS if d not in PAPER2_LONG], target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER2_ROOT}/02_dwell_time"),
+            dict(dwells=PAPER2_LONG, t_max=500000, target_ring=PAPER_RINGS, out_root=f"{PAPER2_ROOT}/02_dwell_time"),
+            dict(receptors_per_cell=PAPER2_DENSITY, target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER2_ROOT}/03_receptor_density"),
+            dict(finds=PAPER2_FINDS, target_ring=PAPER_RINGS, out_root=f"{PAPER2_ROOT}/04_capture_efficiency"),
+            dict(free_fraction=[0.75], finds=PAPER2_FINDS, target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER2_ROOT}/05_fgf_vs_hh/75pct_free"),
+            dict(free_fraction=[0.01], finds=PAPER2_FINDS, target_ring=PAPER_RINGS,
+                 out_root=f"{PAPER2_ROOT}/05_fgf_vs_hh/1pct_free"),
+        ],
+    ),
+    "paper2_deff": dict(
+        common=dict(PLANS_PAPER_DEFF_COMMON, receptors_per_cell=5000, cal_rings=20),
+        blocks=[dict(free_fraction=PAPER2_FREES, out_root=[f"{PAPER2_ROOT}/01_confinement/deff"], **paper2_deff_cell("1"))]
+               + [dict(out_root=[f"{PAPER2_ROOT}/02_dwell_time/deff"], **paper2_deff_cell(d)) for d in PAPER2_DWELLS],
+    ),
     # L122: the same D_eff cells in a 20-ring cluster (up to 9.5% escaped the 12-ring one).
     "paper_deff20": dict(
         common=dict(PLANS_PAPER_DEFF_COMMON, cal_rings=20),
