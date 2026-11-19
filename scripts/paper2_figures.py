@@ -14,6 +14,7 @@ panel side by side:
   ring_t20_<axis>.pdf, ring_rate_<axis>.pdf   x = target ring, one trace per swept value
   deff_<axis>.pdf             D_eff (long lag) and instantaneous D (2 s lag), experiments 1-2
   fgf_vs_hh_<stat>.pdf        75 / 5 / 1% free and free-only vs capture efficiency, rings 1-4
+  06_tortuosity/deff_vs_gap   D vs cell-cell gap, solid vs invisible cells (L127)
   summary_<group>.csv         every cell
 
 Within one experiment every figure of a kind shares its axes across rings and series (L124).
@@ -227,6 +228,55 @@ def deff_figure(exp, xcol, xlabel, out):
     return out
 
 
+def tortuosity_figure(out):
+    """Experiment 6 (L127): D of the pure-3D walker vs the cell-cell gap, solid vs invisible cells."""
+    import re
+    rows = []
+    for kind in ("solid", "invisible", "stepcheck"):
+        for d in sorted((D / "06_tortuosity" / kind).glob("lattice3d*")):
+            f = d / "calibration.csv"
+            m = re.search(r"_gap([\d.]+)nm", d.name)
+            if not f.exists() or not m:
+                continue
+            c = pd.read_csv(f).iloc[0]
+            gap = float(m.group(1)) - (20000 - 2 if kind == "invisible" else 0)  # nominal gap at the same spacing
+            rows.append(dict(kind=kind, gap_nm=gap, d_eff=c.d_eff, d_eff_se=c.d_eff_se, d_short=c.d_eff_short,
+                             escaped=c.escaped, n=c.n))
+    if not rows:
+        print("  06_tortuosity: no runs yet")
+        return
+    t = pd.DataFrame(rows).sort_values(["kind", "gap_nm"])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    t.to_csv(out.with_suffix(".csv"), index=False)
+    fig = plt.figure(figsize=(13, 4.8))
+    ax = both_x(fig, 1, sharey=True, gridspec_kw=dict(wspace=0.08))[0]
+    for j, scale in enumerate(("log", "linear")):
+        for kind, colour, lab in (("solid", vz.SWITCH, "cells solid (molecules reflect)"),
+                                  ("invisible", vz.REFERENCE, "cells invisible (pass through)")):
+            r = t[t.kind == kind]
+            ax[j].errorbar(r.gap_nm, r.d_eff, yerr=1.96 * r.d_eff_se, fmt="o-", color=colour, ms=5, lw=1.6,
+                           label=f"{lab}: effective D (5000 s lag)")
+            ax[j].plot(r.gap_nm, r.d_short, "^--", color=colour, ms=4, lw=1, alpha=0.7,
+                       label=f"{lab}: instantaneous D (2 s lag)")
+        sc = t[t.kind == "stepcheck"]
+        if len(sc):
+            ax[j].errorbar(sc.gap_nm, sc.d_eff, yerr=1.96 * sc.d_eff_se, fmt="D", color=vz.INK, ms=6,
+                           mfc="none", label="1 nm gap, half the step size (accuracy check)")
+        ax[j].axhline(0.5, color=vz.MUTED, lw=1, ls=(0, (4, 3)))
+        ax[j].set_xscale(scale)
+        ax[j].set_xlabel("cell-cell gap (nm)")
+        ax[j].set_title(f"{scale} x", loc="left", fontsize=10, color=vz.SECONDARY)
+        vz.style(ax[j])
+    ax[0].set_ylabel("D (µm²/s)")
+    ax[0].set_ylim(0, 0.56)
+    ax[0].legend(fontsize=8, loc="lower right")
+    fig.suptitle("Tortuosity: pure 3D diffusion vs cell-cell gap  (no binding, no receptors, 20-ring "
+                 "cluster, 1000 molecules; dashed: D = 0.5)", x=0.06, ha="left", fontsize=11.5)
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  06_tortuosity: {len(t)} runs")
+
+
 def main():
     vz.use()
     plt.rcParams["pdf.fonttype"] = 42
@@ -274,6 +324,8 @@ def main():
                               ("02_dwell_time", "bound_dwell", "mean bound dwell (s)")):
         if (D / exp).exists():
             deff_figure(exp, xcol, xlabel, F / exp / f"deff_{'fraction_free' if exp.startswith('01') else 'dwell'}.pdf")
+
+    tortuosity_figure(F / "06_tortuosity" / "deff_vs_gap.pdf")
 
     # Pseudo-FGF vs pseudo-HH: 75 / 5 / 1% free and free-only, all four rings, both x scales.
     series = [(cells.get(("05_fgf_vs_hh", "75pct_free")), vz.SEQ(0.95), "high 3D: 75% free (pseudo-FGF)"),
