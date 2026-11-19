@@ -89,6 +89,10 @@ def paper2_deff_cell(dwell):
     return dict(dwells=[dwell], long_lag=[long_lag], short_lag=[2.0], cal_t_max=[3 * long_lag])
 
 
+PAPER2_GAPS_NM = [1, 2, 3, 5, 7.5, 10, 15, 20, 30, 50, 100, 200, 500, 1000, 2000]  # experiment 6 (L127)
+PAPER2_HALF_STEP = 0.03125  # half of configs/lattice3d.yaml's distance_fraction 0.0625 (L94)
+
+
 PLANS_PAPER_DEFF_COMMON = dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, tag="paper", n=1000,
                                layouts=20, target_ring=2, receptors_per_cell=1000, free_fraction=BASE_FREE,
                                calibration_only=True, calibrate_switch_only=True)
@@ -219,6 +223,19 @@ PLANS = {
         common=dict(PLANS_PAPER_DEFF_COMMON, cal_rings=20),
         blocks=[dict(b, out_root=[r.replace("/deff", "/deff_20rings") for r in b["out_root"]])
                 for b in PAPER_DEFF_BLOCKS],
+    ),
+    # Experiment 6, tortuosity (L127): D of the pure-3D (free-only, receptor-free) walker vs the
+    # cell-cell gap, with solid cells and with effectively invisible ones (1 nm radius at the same
+    # spacing, gap' = 20 um + gap - 2 nm), plus a half-step check at the narrowest gap.
+    "paper2_tortuosity": dict(
+        common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, tag="paper", n=1000, layouts=20,
+                    target_ring=2, receptors_per_cell=5000, free_fraction=1.0, dwells="1",
+                    calibration_only=True, calibrate_switch_only=True, cal_rings=20,
+                    long_lag=5000.0, short_lag=2.0, cal_t_max=15000.0),
+        blocks=[dict(gap_nm=PAPER2_GAPS_NM, out_root=f"{PAPER2_ROOT}/06_tortuosity/solid")]
+               + [dict(gap_nm=[20000 + g - 2], cell_radius=[0.001], out_root=[f"{PAPER2_ROOT}/06_tortuosity/invisible"])
+                  for g in PAPER2_GAPS_NM]
+               + [dict(gap_nm=[1], distance_fraction=[PAPER2_HALF_STEP], out_root=[f"{PAPER2_ROOT}/06_tortuosity/stepcheck"])],
     ),
     "ring3_t2x_n5dwell": dict(
         common=dict(config="configs/lattice3d.yaml", sizes="2", d_ref=0.5, skip_calibration=True,
